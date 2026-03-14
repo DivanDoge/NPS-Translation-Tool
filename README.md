@@ -1,266 +1,182 @@
 # NPS Translation Tool
 
-**NPS Translation Tool** is a utility for extracting dialogue from `.nps` visual novel script files, translating it, and writing translations back into the game.
+A desktop GUI tool for translating `.nps` script files used in NPS-based visual novel engines (e.g. *The Song of Saya* / *Saya no Uta*).
+
+Supports voice lines, narration, and choice branches. Saves progress to a sidecar JSON file so you can pick up where you left off.
 
 ---
 
-# UA Українська версія
+## Features
 
-## 🚀 Запуск
-
-Просто запустіть:
-
-```
-NpsTranslator.exe
-```
-
----
-
-## 📂 Робочий процес
-
-### 1️⃣ Open .nps
-
-- Відкриває `.nps` файл
-- Парсить усі репліки (`voice` + `narration`)
-- Автоматично створює або оновлює `.json` файл поруч
-- Якщо JSON вже існує — підтягує раніше збережені переклади
+- **Open `.nps` and `.json` files** via buttons or drag & drop
+- **Three line types supported:**
+  - `<voice name="...">` — character voice lines
+  - Plain narration lines
+  - `<CHOICE ... TEXT="...">` — choice/branch lines (translates only the `TEXT` value)
+- **Per-row colour coding** — each speaker gets a unique colour; narrator is amber; choice lines are cyan; translated lines turn green
+- **Speaker aliases** — rename any speaker for display convenience; aliases are never written to the source file and persist across sessions
+- **Transliteration** — one-click Latin → Ukrainian transliteration inserted directly into the translation field
+- **Search** — live search across speaker, original, and translation columns with Prev/Next navigation
+- **Progress tracking** — live counter showing how many lines are translated out of total
+- **Quick Save** — saves translation progress to a `.json` sidecar file (Ctrl+S)
+- **Save .nps** — writes a translated copy of the original file as `translated_<filename>.nps`
+- **Counter** — batch word/line count report across multiple `.nps` files
+- **Keyboard navigation** — press Enter in the translation field to save and jump to the next line
 
 ---
 
-### 2️⃣ Quick Save
+## Requirements
 
-- Зберігає поточні переклади у JSON
-- Файл має ту ж назву, що й `.nps`, але з розширенням `.json`
-- Рекомендується використовувати регулярно
+### Running from source
 
----
+- Python 3.10+
+- `tkinterdnd2` *(optional — required for drag & drop)*
 
-### 3️⃣ Save .nps
-
-Створює новий файл:
-
-```
-translated_<оригінальна_назва>.nps
+```bash
+pip install tkinterdnd2
 ```
 
-- Усі технічні теги (`<voice>`, службові команди, і т.д.) зберігаються
-- Змінюється лише текст реплік
+### Running as `.exe`
+
+No Python required. Download the prebuilt `.exe` from [Releases](../../releases).
 
 ---
 
-### 4️⃣ Counter
+## Building the `.exe`
 
-Створює звіт з:
+```bash
+pip install pyinstaller tkinterdnd2
+```
 
-- загальною кількістю рядків
-- загальною кількістю слів
-- переліком усіх реплік для кожного файлу
+Create a `build.bat` in the same folder as the script:
 
----
+```bat
+@echo off
+set SCRIPT_NAME=NPSTranslationTool.py
+set EXE_NAME=NPSTranslationTool
+py -3 -m PyInstaller --noconfirm --onefile --windowed --name "%EXE_NAME%" "%SCRIPT_NAME%"
+echo Done. Executable is in the "dist" folder.
+pause
+```
 
-## 🧾 Таблиця реплік
+Run `build.bat`. The `.exe` will appear in the `dist\` folder.
 
-| Колонка | Опис |
-|----------|------|
-| № | внутрішній ID |
-| Speaker | ім’я персонажа (`narrator`, якщо відсутнє) |
-| Original | оригінальний текст |
-| Translation | переклад |
-| type | `voice` або `narration` |
-| line | номер рядка у файлі |
-
-При виборі рядка:
-
-- оригінал показується у блоці **Original (selected line)**
-- переклад редагується у **Translation (selected line)**
+> Use `--console` instead of `--windowed` during development if you need to see error output.
 
 ---
 
-## ✍️ Редагування перекладу
+## Usage
 
-1. Оберіть рядок у таблиці
-2. Введіть переклад
-3. Натисніть **Enter** — переклад збережеться і перейде до наступного рядка
-4. При перемиканні мишкою переклад попереднього рядка зберігається автоматично
+### Opening a file
 
-Щоб зберегти переклади між сесіями — використовуйте **Quick Save**.
+- Click **📂 Open .nps** to parse a new script file
+- Click **📂 Open .json** to reopen a previously saved session
+- Or drag and drop a `.nps` or `.json` file onto the window *(requires `tkinterdnd2`)*
+
+When a `.nps` file is opened, a sidecar `.json` is automatically created next to it. If one already exists, saved translations are restored automatically.
+
+### Translating
+
+1. Click a row in the table to select it
+2. The original text appears in the **Original** panel
+3. Type your translation in the **Translation** panel
+4. Press **Enter** to save and move to the next line, or click another row
+
+### Buttons in the editor panel
+
+| Button | Action |
+|---|---|
+| ⧉ Copy | Copy the original text to clipboard |
+| 🔤 Translit → Translation | Transliterate Latin characters to Ukrainian and insert into the translation field |
+| ⧉ Copy *(translation)* | Copy the translation to clipboard |
+| ✕ Clear | Clear the translation field |
+
+### Speaker aliases
+
+Click **✏ Rename Speaker** to open the alias editor. Set a display name for any speaker — it will show in the table and speaker label instead of the original name.
+
+- Aliases are **never written to the `.nps` or `.json` file**
+- They are saved to `nps_speaker_aliases.json` next to the `.exe` / script and restored on next launch
+- Aliases apply across all files — if two files share a speaker name, the alias carries over
+
+### Saving
+
+- **💾 Quick Save** (or Ctrl+S) — saves translation progress to the sidecar `.json`
+- **📄 Save .nps** — writes the translated script as `translated_<original_filename>.nps` in the same folder as the source file. Untranslated lines fall back to the original text.
 
 ---
 
-## 🔎 Пошук
+## File format
 
-Пошук без урахування регістру в:
-
-- Speaker
-- Original
-- Translation
-
-Кнопки:
-
-- **Prev**
-- **Next**
-- **Clear**
-
-Enter у полі пошуку = Next.
-
----
-
-## ⌨️ Гарячі клавіші
-
-- Ctrl+C — копіювати
-- Ctrl+V — вставити
-- Ctrl+X — вирізати
-- Ctrl+A — виділити все
-
----
-
-## 📄 Формат JSON
+The sidecar `.json` looks like this:
 
 ```json
 {
-  "source_file": "path_to_original.nps",
+  "source_file": "C:/path/to/script.nps",
   "entries": [
     {
-      "id": 1,
+      "id": 0,
       "type": "voice",
-      "line_no": 123,
-      "speaker": "Character",
-      "original": "Original text",
-      "translation": "Translated text"
+      "line_no": 12,
+      "speaker": "Fuminori",
+      "original": "It's nothing.",
+      "translation": "Нічого."
+    },
+    {
+      "id": 1,
+      "type": "choice",
+      "line_no": 34,
+      "speaker": "CHOICE",
+      "original": "...want it all back.",
+      "translation": "...хочу повернути все."
     }
   ]
 }
 ```
 
----
-
-# EN English Version
-
-## 🚀 Launch
-
-Simply run:
-
-
-NpsTranslator.exe
-
+`type` is one of `voice`, `narration`, or `choice`.
 
 ---
 
-## 📂 Workflow
+## Transliteration table
 
-### 1️⃣ Open .nps
+The **🔤 Translit** button converts Latin characters to Ukrainian using this mapping:
 
-- Opens a `.nps` file
-- Parses all dialogue lines (`voice` + `narration`)
-- Automatically creates or updates a `.json` file next to it
-- If a JSON file already exists — previously saved translations are loaded automatically
+| Latin | Ukrainian | Latin | Ukrainian |
+|---|---|---|---|
+| shch | щ | sh | ш |
+| ch | ч | zh | ж |
+| kh | х | ts | ц |
+| ya | я | yu | ю |
+| ye | є | yi | ї |
+| a | а | b | б |
+| v | в | g | г |
+| h | г | d | д |
+| e | е | z | з |
+| y | и | i | і |
+| j | й | k | к |
+| l | л | m | м |
+| n | н | o | о |
+| p | п | r | р |
+| s | с | t | т |
+| u | у | f | ф |
+| w | в | x | кс |
+| q | к | c | с |
 
----
-
-### 2️⃣ Quick Save
-
-- Saves current translations to JSON
-- File has the same name as the `.nps`, but with a `.json` extension
-- Recommended to use regularly to avoid losing progress
-
----
-
-### 3️⃣ Save .nps
-
-Creates a new file:
-
-
-translated_<original_name>.nps
-
-
-- All technical tags (`<voice>`, script commands, etc.) are preserved
-- Only the dialogue text is replaced
+Multi-character sequences are matched before single characters (longest match first).
 
 ---
 
-### 4️⃣ Counter
+## Keyboard shortcuts
 
-Generates a report containing:
-
-- total number of translatable lines
-- total word count
-- full list of lines for each selected file
-
----
-
-## 🧾 Lines Table
-
-| Column | Description |
-|--------|------------|
-| № | internal line ID |
-| Speaker | character name (`narrator` if empty) |
-| Original | original text |
-| Translation | translated text |
-| type | `voice` or `narration` |
-| line | line number inside the file |
-
-When selecting a row:
-
-- original text is displayed in **Original (selected line)**
-- translation can be edited in **Translation (selected line)**
+| Shortcut | Action |
+|---|---|
+| Ctrl+S | Quick Save |
+| Enter *(in translation field)* | Save current line and move to next |
+| Ctrl+C / V / X / A | Standard clipboard shortcuts in text fields |
 
 ---
 
-## ✍️ Editing Translation
+## License
 
-1. Select a row in the table
-2. Enter your translation
-3. Press **Enter** — the translation is saved and selection moves to the next row
-4. Switching rows with the mouse saves the previous translation automatically
-
-Translations are stored in memory while the program is running.  
-Use **Quick Save** to persist them between sessions.
-
----
-
-## 🔎 Search
-
-Case-insensitive search in:
-
-- Speaker
-- Original
-- Translation
-
-Buttons:
-
-- **Prev**
-- **Next**
-- **Clear**
-
-Enter in the search field works as **Next**.
-
----
-
-## ⌨️ Hotkeys
-
-- Ctrl+C — copy
-- Ctrl+V — paste
-- Ctrl+X — cut
-- Ctrl+A — select all
-
-Works in all text fields and in the table.
-
----
-
-## 📄 JSON Format
-
-```json
-{
-  "source_file": "path_to_original.nps",
-  "entries": [
-    {
-      "id": 1,
-      "type": "voice",
-      "line_no": 123,
-      "speaker": "Character",
-      "original": "Original text",
-      "translation": "Translated text"
-    }
-  ]
-}
-
+MIT
