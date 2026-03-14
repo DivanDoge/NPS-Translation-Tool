@@ -1,0 +1,7 @@
+dist/
+build/
+*.spec
+__pycache__/
+*.pyc
+nps_speaker_aliases.json
+__tmp_nps_translator__.json
