@@ -17,30 +17,19 @@ except Exception:
     tk = None
 
 
-APP_VERSION   = "1.2.0"
+APP_VERSION   = "1.3.1"
 
 def _get_aliases_file() -> Path:
-    """
-    Returns a stable path for nps_speaker_aliases.json.
-    For PyInstaller --onefile, sys.argv[0] is the real .exe path.
-    For plain .py, __file__ is used. Falls back to APPDATA.
-    """
     import os
-
     candidates = []
-
-    # 1. Real exe location (works for both PyInstaller --onefile and plain launch)
     try:
         candidates.append(Path(sys.argv[0]).resolve().parent)
     except Exception:
         pass
-
-    # 2. Script file location
     try:
         candidates.append(Path(__file__).resolve().parent)
     except Exception:
         pass
-
     for folder in candidates:
         try:
             candidate = folder / "nps_speaker_aliases.json"
@@ -48,8 +37,6 @@ def _get_aliases_file() -> Path:
             return candidate
         except Exception:
             pass
-
-    # 3. Fallback: platform config dir
     if sys.platform == "win32":
         base = Path(os.environ.get("APPDATA", Path.home()))
     else:
@@ -75,7 +62,6 @@ def save_aliases(aliases: dict):
         _ALIASES_FILE.write_text(
             json.dumps(aliases, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as e:
-        # Write error to a log file next to aliases file so user can inspect
         try:
             log = _ALIASES_FILE.with_name("nps_aliases_error.log")
             log.write_text("Save error: " + str(e) + "\nPath: " + str(_ALIASES_FILE) + "\n", encoding="utf-8")
@@ -86,24 +72,19 @@ def save_aliases(aliases: dict):
 # Transliteration: Latin → Ukrainian
 # ─────────────────────────────────────────────────────────────────────────────
 _TRANSLIT_PAIRS = sorted({
-    # ── 4-char sequences (must come before shorter ones) ──────────────────
     "Shch": "Щ", "shch": "щ",
-    # ── 2-char uppercase ──────────────────────────────────────────────────
     "Ye": "Є", "Zh": "Ж", "Yi": "Ї", "Kh": "Х",
     "Ts": "Ц", "Ch": "Ч", "Sh": "Ш", "Shh": "Щ",
     "Yu": "Ю", "Ya": "Я",
-    # ── 2-char lowercase ──────────────────────────────────────────────────
     "ye": "є", "zh": "ж", "yi": "ї", "kh": "х",
     "ts": "ц", "ch": "ч", "sh": "ш", "shh": "щ",
     "yu": "ю", "ya": "я",
-    # ── 1-char uppercase (every letter A-Z) ───────────────────────────────
     "A": "А", "B": "Б", "C": "С", "D": "Д", "E": "Е",
     "F": "Ф", "G": "Г", "H": "Г", "I": "І", "J": "Й",
     "K": "К", "L": "Л", "M": "М", "N": "Н", "O": "О",
     "P": "П", "Q": "К", "R": "Р", "S": "С", "T": "Т",
     "U": "У", "V": "В", "W": "В", "X": "КС", "Y": "И",
     "Z": "З",
-    # ── 1-char lowercase (every letter a-z) ───────────────────────────────
     "a": "а", "b": "б", "c": "с", "d": "д", "e": "е",
     "f": "ф", "g": "г", "h": "г", "i": "і", "j": "й",
     "k": "к", "l": "л", "m": "м", "n": "н", "o": "о",
@@ -133,8 +114,6 @@ def transliterate_latin_to_ua(text: str) -> str:
 # NPS parsing
 # ─────────────────────────────────────────────────────────────────────────────
 VOICE_LINE_RE  = re.compile(r'(<voice\b[^>]*\bname="([^"]+)"[^>]*>)(.*)$', re.IGNORECASE)
-# Matches: <CHOICE HREF="..." TEXT="the text" OPERATOR="..."></A>//
-# Skips lines commented out with leading //
 CHOICE_LINE_RE = re.compile(r'(?i)^(?!\s*//)(.*)(<CHOICE\b[^>]*\bTEXT="([^"]*)"[^>]*></A>//?.*)$')
 
 
@@ -153,14 +132,7 @@ def split_voice_line(line: str):
 
 
 def split_choice_line(line: str):
-    """
-    Returns (pre, tag_with_text, text, post) if this is an active CHOICE line.
-    'pre' is everything before <CHOICE, 'tag_with_text' is the full tag,
-    'text' is the TEXT= value, 'post' is everything after the tag.
-    Returns None for commented-out lines or non-CHOICE lines.
-    """
     stripped = line.strip()
-    # Skip commented-out choice lines
     if stripped.startswith("//"):
         return None
     m = re.search(r'(?i)(<CHOICE\b[^>]*\bTEXT="([^"]*)"[^>]*></A>//?.*)$', line)
@@ -190,7 +162,6 @@ def build_entries_from_nps(nps_path: Path):
     lines = nps_path.read_text(encoding="utf-8").splitlines()
     entries, entry_id = [], 0
     for lineno, line in enumerate(lines, start=1):
-        # 1. Voice line
         vd = split_voice_line(line)
         if vd:
             speaker, _h, text, _t = vd
@@ -199,7 +170,6 @@ def build_entries_from_nps(nps_path: Path):
                                 "speaker": speaker, "original": text, "translation": ""})
                 entry_id += 1
             continue
-        # 2. Choice line
         cd = split_choice_line(line)
         if cd:
             _pre, _tag, text = cd
@@ -208,7 +178,6 @@ def build_entries_from_nps(nps_path: Path):
                                 "speaker": "CHOICE", "original": text, "translation": ""})
                 entry_id += 1
             continue
-        # 3. Narration
         nd = split_narration_line(line)
         if nd:
             _h, text, _t = nd
@@ -253,8 +222,6 @@ def apply_translations_json(nps_path: Path, json_path: Path, out_path):
                 pre, tag_and_rest, old_text = cd
                 if current and current.get("type") == "choice":
                     new_text = (current.get("translation") or "").strip() or old_text
-                    # Replace only the TEXT="..." value inside the tag
-                    # Replace only the TEXT="..." value inside the tag
                     tag_replaced = re.sub(
                         r'TEXT="[^"]*"',
                         'TEXT="' + new_text + '"',
@@ -284,6 +251,37 @@ def apply_translations_json(nps_path: Path, json_path: Path, out_path):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Import translation from plain NPS file (no JSON)
+# Matches lines by position/order of translatable entries
+# ─────────────────────────────────────────────────────────────────────────────
+def import_translations_from_nps(translated_nps_path: Path, original_entries: list) -> tuple:
+    """
+    Parse the translated .nps file and match its translatable lines
+    to the original entries by position (index order).
+    Returns (updated_entries, matched_count, total_count).
+    """
+    translated_entries = build_entries_from_nps(translated_nps_path)
+
+    matched = 0
+    total = min(len(original_entries), len(translated_entries))
+
+    updated = [e.copy() for e in original_entries]
+
+    for i, orig in enumerate(updated):
+        if i >= len(translated_entries):
+            break
+        tr = translated_entries[i]
+        # Only import if the translated text differs from original
+        tr_text = tr.get("original", "").strip()
+        orig_text = orig.get("original", "").strip()
+        if tr_text and tr_text != orig_text:
+            orig["translation"] = tr_text
+            matched += 1
+
+    return updated, matched, total
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # GUI
 # ─────────────────────────────────────────────────────────────────────────────
 def run_gui(initial_path: Path = None):
@@ -291,7 +289,6 @@ def run_gui(initial_path: Path = None):
         print("tkinter unavailable.")
         return
 
-    # IMPORTANT: TkinterDnD.Tk must be used from the start for DnD to work
     if _DND_AVAILABLE:
         root = TkinterDnD.Tk()
     else:
@@ -313,6 +310,7 @@ def run_gui(initial_path: Path = None):
     ORANGE  = "#e8a24f"
     SEL_BG  = "#3a3460"
     BTN_HO  = "#3c3c44"
+    TEAL    = "#2a7a6f"
 
     root.configure(bg=BG)
 
@@ -367,9 +365,8 @@ def run_gui(initial_path: Path = None):
         widget.bind("<Enter>", show)
         widget.bind("<Leave>", hide)
 
-    # ── Speaker aliases (persisted across sessions via JSON file) ──────────
-    # Wrapped in a list so nested functions can mutate it without 'nonlocal'
-    _aliases_box = [load_aliases()]   # _aliases_box[0] is the live dict
+    # ── Speaker aliases ──────────────────────────────────────────────────────
+    _aliases_box = [load_aliases()]
 
     def get_display_speaker(original: str) -> str:
         if not original:
@@ -445,27 +442,13 @@ def run_gui(initial_path: Path = None):
     tree.tag_configure("done",     foreground=GREEN)
     tree.tag_configure("empty",    foreground=FG_DIM)
     tree.tag_configure("narrator", foreground=ORANGE)
-    tree.tag_configure("choice",   foreground="#89ddff")  # cyan for choice lines
+    tree.tag_configure("choice",   foreground="#89ddff")
 
-    # Speaker colour palette (no green — reserved for "done")
     _SPEAKER_COLOURS = [
-        "#c792ea",  # lavender
-        "#5a9cf8",  # sky blue
-        "#e8a24f",  # amber  (= ORANGE, used for narrator too)
-        "#f07178",  # coral red
-        "#89ddff",  # cyan
-        "#c3e88d",  # lime (light, not bright green)
-        "#ff9cac",  # pink
-        "#82aaff",  # periwinkle
-        "#ffcb6b",  # gold
-        "#b2ccd6",  # steel blue-grey
-        "#d4a5ff",  # violet
-        "#ff869a",  # salmon
-        "#80cbc4",  # teal
-        "#f78c6c",  # peach-orange
-        "#a6accd",  # cool grey
+        "#c792ea", "#5a9cf8", "#e8a24f", "#f07178", "#89ddff",
+        "#c3e88d", "#ff9cac", "#82aaff", "#ffcb6b", "#b2ccd6",
+        "#d4a5ff", "#ff869a", "#80cbc4", "#f78c6c", "#a6accd",
     ]
-    # Maps original speaker name → colour string; built in rebuild_tree
     _speaker_colour_map: dict = {}
 
     vsb = ttk.Scrollbar(tree_frame, orient="vertical",
@@ -505,7 +488,6 @@ def run_gui(initial_path: Path = None):
     orig_header = tk.Frame(orig_frame, bg=BG)
     orig_header.pack(fill=tk.X)
     mk_label(orig_header, "Original", bg=BG, fg=FG_DIM).pack(side=tk.LEFT)
-    # Buttons reference functions defined below — closures capture by reference, so this is fine
     mk_btn(orig_header, "⧉ Copy",
            lambda: _copy_original_plain(), SURFACE,
            tooltip="Copy original text to clipboard"
@@ -530,6 +512,9 @@ def run_gui(initial_path: Path = None):
     tr_header = tk.Frame(tr_frame, bg=BG)
     tr_header.pack(fill=tk.X)
     mk_label(tr_header, "Translation", bg=BG, fg=FG_DIM).pack(side=tk.LEFT)
+    tk.Label(tr_header, text="↑↓ navigate  •  Enter → next",
+             bg=BG, fg="#444455", font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(10, 0))
+
     mk_btn(tr_header, "⧉ Copy",
            lambda: _copy_translation(), SURFACE,
            tooltip="Copy translation to clipboard"
@@ -548,7 +533,7 @@ def run_gui(initial_path: Path = None):
     translation_text.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
 
     # ════════════════════════════════════════════════════════════════════════
-    # LOGIC (all functions that reference widgets defined above)
+    # LOGIC
     # ════════════════════════════════════════════════════════════════════════
 
     search_state = {"matches": [], "index": -1}
@@ -573,6 +558,38 @@ def run_gui(initial_path: Path = None):
         fname = (nps_path.name if nps_path else None) or (json_path.name if json_path else "")
         root.title(f"NPS Translation Tool — {fname}")
         set_status(f"Loaded: {fname}  |  {len(entries)} entries")
+        update_progress()
+
+    # ── Navigation ───────────────────────────────────────────────────────────
+    def navigate_entry(direction: int):
+        """Move to the previous (-1) or next (+1) entry in the tree."""
+        apply_translation_from_widget()
+        children = tree.get_children()
+        if not children:
+            return
+        sel = tree.selection()
+        if sel:
+            try:
+                idx = list(children).index(sel[0])
+            except ValueError:
+                idx = -1
+        else:
+            idx = -1
+
+        new_idx = idx + direction
+        if new_idx < 0:
+            new_idx = 0
+        elif new_idx >= len(children):
+            new_idx = len(children) - 1
+
+        if new_idx == idx:
+            return
+
+        iid = children[new_idx]
+        tree.selection_set(iid)
+        tree.focus(iid)
+        tree.see(iid)
+        on_tree_select()
         update_progress()
 
     # ── File loading ─────────────────────────────────────────────────────────
@@ -635,17 +652,145 @@ def run_gui(initial_path: Path = None):
             messagebox.showwarning(
                 "Unsupported", f"Cannot open: {path.name}\nSupported: .nps, .json")
 
+    # ── Import translation from plain NPS ────────────────────────────────────
+    def import_translation_from_nps():
+        """
+        Open a translated .nps file (no JSON), match entries by position,
+        and fill in translation fields. Shows a preview/confirmation dialog.
+        """
+        if not state["entries"]:
+            messagebox.showinfo("Import Translation",
+                                "Please open an original .nps or .json file first.")
+            return
+
+        fn = filedialog.askopenfilename(
+            title="Open translated .nps file",
+            filetypes=[("NPS files", "*.nps"), ("All files", "*.*")])
+        if not fn:
+            return
+        tr_path = Path(fn)
+
+        try:
+            updated, matched, total = import_translations_from_nps(tr_path, state["entries"])
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to import translations:\n{e}")
+            return
+
+        if matched == 0:
+            messagebox.showinfo(
+                "Import Translation",
+                f"No differences found between the files.\n"
+                f"Compared {total} entries — all texts are identical.\n\n"
+                f"Make sure you selected the TRANSLATED file, not the original.")
+            return
+
+        # Preview dialog
+        win = tk.Toplevel(root)
+        win.title("Import Translation — Preview")
+        win.configure(bg=BG)
+        win.grab_set()
+        win.resizable(True, True)
+        win.minsize(700, 400)
+
+        tk.Label(win,
+                 text=f"Found {matched} translated lines out of {total} compared entries.",
+                 bg=BG, fg=GREEN, font=("Segoe UI", 10, "bold")
+                 ).pack(padx=16, pady=(12, 2))
+        tk.Label(win,
+                 text="Preview of changes (Original → Translation). Scroll to review.",
+                 bg=BG, fg=FG_DIM, font=("Segoe UI", 9)
+                 ).pack(padx=16, pady=(0, 6))
+        tk.Frame(win, bg=BORDER, height=1).pack(fill=tk.X, padx=16)
+
+        # Scrollable preview
+        pf = tk.Frame(win, bg=BG)
+        pf.pack(fill=tk.BOTH, expand=True, padx=16, pady=8)
+
+        preview_tree = ttk.Treeview(pf,
+                                    columns=("id", "original", "translation"),
+                                    show="headings", height=14)
+        preview_tree.heading("id",          text="ID",          anchor="center")
+        preview_tree.heading("original",    text="Original",    anchor="w")
+        preview_tree.heading("translation", text="Translation", anchor="w")
+        preview_tree.column("id",          width=50,  anchor="center", stretch=False)
+        preview_tree.column("original",    width=310, anchor="w",      stretch=True)
+        preview_tree.column("translation", width=310, anchor="w",      stretch=True)
+        preview_tree.tag_configure("changed", foreground=GREEN)
+        preview_tree.tag_configure("same",    foreground=FG_DIM)
+
+        pvb = ttk.Scrollbar(pf, orient="vertical", command=preview_tree.yview)
+        preview_tree.configure(yscroll=pvb.set)
+        preview_tree.grid(row=0, column=0, sticky="nsew")
+        pvb.grid(row=0, column=1, sticky="ns")
+        pf.rowconfigure(0, weight=1)
+        pf.columnconfigure(0, weight=1)
+
+        for orig_e, upd_e in zip(state["entries"], updated):
+            tr = upd_e.get("translation", "").strip()
+            orig_txt = orig_e.get("original", "")
+            tag = "changed" if tr and tr != orig_txt else "same"
+            preview_tree.insert("", tk.END,
+                                values=(orig_e.get("id"), orig_txt, tr or "—"),
+                                tags=(tag,))
+
+        tk.Frame(win, bg=BORDER, height=1).pack(fill=tk.X, padx=16)
+
+        # Overwrite options
+        opt_frame = tk.Frame(win, bg=BG)
+        opt_frame.pack(fill=tk.X, padx=16, pady=6)
+        overwrite_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            opt_frame,
+            text="Overwrite existing translations (uncheck = only fill empty fields)",
+            variable=overwrite_var,
+            bg=BG, fg=FG, selectcolor=SURFACE,
+            activebackground=BG, activeforeground=FG,
+            font=("Segoe UI", 9)
+        ).pack(side=tk.LEFT)
+
+        confirmed = [False]
+
+        def apply_import():
+            confirmed[0] = True
+            overwrite = overwrite_var.get()
+            apply_translation_from_widget()  # save current editor state first
+
+            for orig_e, upd_e in zip(state["entries"], updated):
+                new_tr = upd_e.get("translation", "").strip()
+                if not new_tr:
+                    continue
+                existing = (orig_e.get("translation") or "").strip()
+                if existing and not overwrite:
+                    continue
+                orig_e["translation"] = new_tr
+
+            state["modified"] = True
+            rebuild_tree()
+            update_progress()
+            set_status(f"Import complete — {matched} translations applied from {tr_path.name}")
+            win.destroy()
+
+        btn_row = tk.Frame(win, bg=BG)
+        btn_row.pack(pady=10)
+        mk_btn(btn_row, "✔ Apply Import", apply_import, GREEN).pack(side=tk.LEFT, padx=6)
+        mk_btn(btn_row, "✕ Cancel",       win.destroy,  SURFACE).pack(side=tk.LEFT, padx=6)
+
+        win.update_idletasks()
+        w = max(win.winfo_reqwidth(), 740)
+        h = max(win.winfo_reqheight(), 480)
+        rx = root.winfo_rootx() + (root.winfo_width()  - w) // 2
+        ry = root.winfo_rooty() + (root.winfo_height() - h) // 2
+        win.geometry(f"{w}x{h}+{rx}+{ry}")
+
     # ── Drag & Drop ──────────────────────────────────────────────────────────
     def _on_drop(event):
         raw = event.data.strip()
-        # tkinterdnd2 wraps paths that contain spaces in {braces}
         paths = re.findall(r'\{([^}]+)\}|(\S+)', raw)
         first = next((a or b for a, b in paths), None)
         if first:
             open_any_file(Path(first))
 
     if _DND_AVAILABLE:
-        # Register the root window and every major widget
         for w in (root, tree, original_text, translation_text):
             try:
                 w.drop_target_register(DND_FILES)
@@ -769,13 +914,11 @@ def run_gui(initial_path: Path = None):
             text="Speaker display aliases  —  only visible in this app, never saved to file",
             bg=BG, fg=FG_DIM, font=("Segoe UI", 9)
         ).pack(padx=16, pady=(12, 2))
-
         tk.Label(
             win,
             text="Original name → Display alias   (leave blank to keep original)",
             bg=BG, fg="#555566", font=("Segoe UI", 8)
         ).pack(padx=16, pady=(0, 6))
-
         tk.Frame(win, bg=BORDER, height=1).pack(fill=tk.X, padx=16)
 
         list_frame = tk.Frame(win, bg=BG)
@@ -785,11 +928,9 @@ def run_gui(initial_path: Path = None):
         for sp in speakers_orig:
             row = tk.Frame(list_frame, bg=BG)
             row.pack(fill=tk.X, pady=4)
-
             tk.Label(row, text=sp, bg=BG, fg=FG,
                      font=("Segoe UI", 9), width=30, anchor="w"
                      ).pack(side=tk.LEFT, padx=(0, 8))
-
             var = tk.StringVar(value=_aliases_box[0].get(sp, ""))
             tk.Entry(row, textvariable=var, bg=SURFACE, fg=FG,
                      insertbackground=FG, relief="flat",
@@ -810,7 +951,7 @@ def run_gui(initial_path: Path = None):
                     aliases[sp] = alias
                 else:
                     aliases.pop(sp, None)
-            save_aliases(aliases)   # persist to disk
+            save_aliases(aliases)
             rebuild_tree()
             on_tree_select()
             win.destroy()
@@ -820,7 +961,6 @@ def run_gui(initial_path: Path = None):
         mk_btn(btn_row, "✔ Apply",  apply_aliases, ACCENT).pack(side=tk.LEFT, padx=6)
         mk_btn(btn_row, "✕ Cancel", win.destroy,   SURFACE).pack(side=tk.LEFT, padx=6)
 
-        # Centre window over root after content is laid out
         win.update_idletasks()
         w = win.winfo_reqwidth()
         h = win.winfo_reqheight()
@@ -833,18 +973,12 @@ def run_gui(initial_path: Path = None):
         return original_text.get("1.0", tk.END).rstrip("\n")
 
     def _copy_original_plain():
-        """Copy original to clipboard (no translit)."""
         txt = _get_original_text()
         root.clipboard_clear()
         root.clipboard_append(txt)
         set_status("Copied original to clipboard")
 
     def _translit_to_translation_field():
-        """
-        Transliterate Latin → Ukrainian and INSERT result into the
-        Translation field (replaces its current content).
-        Does NOT touch the clipboard at all.
-        """
         txt = _get_original_text()
         if not txt:
             return
@@ -862,12 +996,11 @@ def run_gui(initial_path: Path = None):
 
     # ── Tree ─────────────────────────────────────────────────────────────────
     def _ensure_speaker_tag(orig_spk: str):
-        """Register a Treeview tag for this speaker if not already done."""
         if not orig_spk:
-            return  # narrator uses its own static tag
+            return
         tag = f"spk_{orig_spk}"
         if tag not in _speaker_colour_map:
-            idx   = len(_speaker_colour_map) % len(_SPEAKER_COLOURS)
+            idx    = len(_speaker_colour_map) % len(_SPEAKER_COLOURS)
             colour = _SPEAKER_COLOURS[idx]
             _speaker_colour_map[tag] = colour
             tree.tag_configure(tag, foreground=colour)
@@ -1018,21 +1151,28 @@ def run_gui(initial_path: Path = None):
 
     root.bind_all("<KeyPress>", on_ctrl_key)
 
+    # ── Arrow key navigation ─────────────────────────────────────────────────
+    # Up/Down in the translation Text widget → move between entries
+    def on_up_in_translation(event):
+        navigate_entry(-1)
+        return "break"
+
+    def on_down_in_translation(event):
+        navigate_entry(1)
+        return "break"
+
+    translation_text.bind("<Up>",   on_up_in_translation)
+    translation_text.bind("<Down>", on_down_in_translation)
+
+    # Up/Down on the tree → sync editor panel after Treeview moves its cursor
+    def on_tree_arrow(event):
+        root.after(10, on_tree_select)
+
+    tree.bind("<Up>",   on_tree_arrow)
+    tree.bind("<Down>", on_tree_arrow)
+
     def on_enter_in_translation(event):
-        apply_translation_from_widget()
-        children = tree.get_children()
-        if not children:
-            return "break"
-        sel = tree.selection()
-        idx = children.index(sel[0]) if sel else -1
-        nxt = idx + 1
-        if nxt < len(children):
-            iid = children[nxt]
-            tree.selection_set(iid)
-            tree.focus(iid)
-            tree.see(iid)
-            on_tree_select()
-        update_progress()
+        navigate_entry(1)
         return "break"
 
     translation_text.bind(
@@ -1042,15 +1182,19 @@ def run_gui(initial_path: Path = None):
     tree.bind("<<TreeviewSelect>>", on_tree_select)
 
     # ── Toolbar buttons ──────────────────────────────────────────────────────
-    mk_btn(tb_left, "📂 Open .nps",  load_nps,            ACCENT
+    mk_btn(tb_left, "📂 Open .nps",  load_nps,                    ACCENT
            ).pack(side=tk.LEFT, padx=(0, 4))
-    mk_btn(tb_left, "📂 Open .json", load_json,           SURFACE
+    mk_btn(tb_left, "📂 Open .json", load_json,                   SURFACE
            ).pack(side=tk.LEFT, padx=(0, 4))
-    mk_btn(tb_left, "💾 Quick Save", quick_save_json,     ACCENT2, tooltip="Ctrl+S"
+    mk_btn(tb_left, "💾 Quick Save", quick_save_json,             ACCENT2,
+           tooltip="Ctrl+S"
            ).pack(side=tk.LEFT, padx=(0, 4))
-    mk_btn(tb_left, "📄 Save .nps",  save_translated_nps, SURFACE
+    mk_btn(tb_left, "📄 Save .nps",  save_translated_nps,         SURFACE
            ).pack(side=tk.LEFT, padx=(0, 4))
-    mk_btn(tb_left, "🔢 Counter",    run_counter,         SURFACE
+    mk_btn(tb_left, "📥 Import Translation", import_translation_from_nps, TEAL,
+           tooltip="Import translations from a plain translated .nps file"
+           ).pack(side=tk.LEFT, padx=(0, 4))
+    mk_btn(tb_left, "🔢 Counter",    run_counter,                 SURFACE
            ).pack(side=tk.LEFT, padx=(0, 4))
 
     # ── Window close ─────────────────────────────────────────────────────────
