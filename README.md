@@ -16,12 +16,13 @@ Supports voice lines, narration, and choice branches. Saves progress to a sideca
 - **Per-row colour coding** — each speaker gets a unique colour; narrator is amber; choice lines are cyan; translated lines turn green
 - **Speaker aliases** — rename any speaker for display convenience; aliases are never written to the source file and persist across sessions
 - **Transliteration** — one-click Latin → Ukrainian transliteration inserted directly into the translation field
+- **Import translation** — load a plain translated `.nps` file (no JSON needed) and automatically match its lines into the translation fields
 - **Search** — live search across speaker, original, and translation columns with Prev/Next navigation
 - **Progress tracking** — live counter showing how many lines are translated out of total
 - **Quick Save** — saves translation progress to a `.json` sidecar file (Ctrl+S)
 - **Save .nps** — writes a translated copy of the original file as `translated_<filename>.nps`
 - **Counter** — batch word/line count report across multiple `.nps` files
-- **Keyboard navigation** — press Enter in the translation field to save and jump to the next line
+- **Keyboard navigation** — ↑/↓ arrows to move between entries; Enter to save and jump to the next line
 
 ---
 
@@ -80,7 +81,20 @@ When a `.nps` file is opened, a sidecar `.json` is automatically created next to
 1. Click a row in the table to select it
 2. The original text appears in the **Original** panel
 3. Type your translation in the **Translation** panel
-4. Press **Enter** to save and move to the next line, or click another row
+4. Press **Enter** to save and move to the next line, or use **↑/↓** to navigate freely
+
+### Importing a translation
+
+If you already have a translated `.nps` file but no `.json` session:
+
+1. Open the original `.nps` file first
+2. Click **📥 Import Translation**
+3. Select the translated `.nps` file
+4. A preview dialog shows all matched lines — review them before applying
+5. Use the **Overwrite existing translations** checkbox to control whether already-filled fields get replaced
+6. Click **✔ Apply Import**
+
+Lines are matched by position (entry order), so the translated file must correspond to the same original script.
 
 ### Buttons in the editor panel
 
@@ -173,6 +187,8 @@ Multi-character sequences are matched before single characters (longest match fi
 |---|---|
 | Ctrl+S | Quick Save |
 | Enter *(in translation field)* | Save current line and move to next |
+| ↑ / ↓ *(in translation field)* | Move to previous / next entry |
+| ↑ / ↓ *(in the table)* | Move between rows and sync the editor panel |
 | Ctrl+C / V / X / A | Standard clipboard shortcuts in text fields |
 
 ---
