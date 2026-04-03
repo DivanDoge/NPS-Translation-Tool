@@ -17,7 +17,7 @@ except Exception:
     tk = None
 
 
-APP_VERSION   = "1.3.1"
+APP_VERSION   = "1.4.0"
 
 def _get_aliases_file() -> Path:
     import os
@@ -46,6 +46,12 @@ def _get_aliases_file() -> Path:
     return cfg_dir / "nps_speaker_aliases.json"
 
 _ALIASES_FILE = _get_aliases_file()
+
+
+def _resource_path(name: str) -> Path:
+    """Resolve bundled resource path (PyInstaller) or local file path."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base / name
 
 
 def load_aliases() -> dict:
@@ -294,6 +300,15 @@ def run_gui(initial_path: Path = None):
     else:
         root = tk.Tk()
 
+    app_icon_ref = [None]
+    try:
+        icon_path = _resource_path("Locus-logo.png")
+        if icon_path.exists():
+            app_icon_ref[0] = tk.PhotoImage(file=str(icon_path))
+            root.iconphoto(True, app_icon_ref[0])
+    except Exception:
+        pass
+
     root.title("NPS Translation Tool")
     root.minsize(900, 600)
 
@@ -350,6 +365,16 @@ def run_gui(initial_path: Path = None):
                         bg=kw.pop("bg", BG), fg=kw.pop("fg", FG_DIM),
                         font=("Segoe UI", 9), **kw)
 
+    def mk_entry(parent, **kw):
+        # Some Tk builds do not support Entry undo/maxundo options.
+        with_undo = dict(kw)
+        with_undo.setdefault("undo", True)
+        with_undo.setdefault("maxundo", 200)
+        try:
+            return tk.Entry(parent, **with_undo)
+        except tk.TclError:
+            return tk.Entry(parent, **kw)
+
     def _add_tooltip(widget, tip_text):
         tip_win = [None]
         def show(e):
@@ -377,6 +402,7 @@ def run_gui(initial_path: Path = None):
     state = {
         "data": None, "entries": [], "json_path": None,
         "nps_path": None, "current_id": None, "modified": False,
+        "entry_history": {}, "history_busy": False,
     }
 
     # ════════════════════════════════════════════════════════════════════════
@@ -409,7 +435,7 @@ def run_gui(initial_path: Path = None):
     search_bar.pack(fill=tk.X)
     mk_label(search_bar, "🔍", bg=PANEL, fg=FG_DIM).pack(side=tk.LEFT, padx=(8, 2))
     search_var = tk.StringVar()
-    search_entry = tk.Entry(search_bar, textvariable=search_var, bg=SURFACE, fg=FG,
+    search_entry = mk_entry(search_bar, textvariable=search_var, bg=SURFACE, fg=FG,
                             insertbackground=FG, relief="flat", bd=0,
                             font=("Segoe UI", 9), highlightthickness=1,
                             highlightbackground=BORDER, highlightcolor=ACCENT)
@@ -512,7 +538,7 @@ def run_gui(initial_path: Path = None):
     tr_header = tk.Frame(tr_frame, bg=BG)
     tr_header.pack(fill=tk.X)
     mk_label(tr_header, "Translation", bg=BG, fg=FG_DIM).pack(side=tk.LEFT)
-    tk.Label(tr_header, text="↑↓ navigate  •  Enter → next",
+    tk.Label(tr_header, text="↑↓ navigate  •  Enter → next  •  -- → —",
              bg=BG, fg="#444455", font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(10, 0))
 
     mk_btn(tr_header, "⧉ Copy",
@@ -523,6 +549,12 @@ def run_gui(initial_path: Path = None):
            lambda: translation_text.delete("1.0", tk.END), SURFACE,
            tooltip="Clear translation field"
            ).pack(side=tk.RIGHT, padx=(4, 0))
+    mk_btn(tr_header, "↷", lambda: redo_action(), SURFACE, width=3,
+           tooltip="Redo (Ctrl+Y / Ctrl+Shift+Z)"
+           ).pack(side=tk.RIGHT, padx=(4, 0))
+    mk_btn(tr_header, "↶", lambda: undo_action(), SURFACE, width=3,
+           tooltip="Undo (Ctrl+Z), up to 200 actions"
+           ).pack(side=tk.RIGHT, padx=(4, 0))
 
     translation_text = tk.Text(tr_frame, height=3, wrap="word",
                                bg=SURFACE, fg=FG, insertbackground=FG,
@@ -531,6 +563,37 @@ def run_gui(initial_path: Path = None):
                                highlightbackground=BORDER, highlightcolor=ACCENT,
                                selectbackground=SEL_BG)
     translation_text.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+
+    # ════════════════════════════════════════════════════════════════════════
+    # ── Em-dash autocorrect: -- → — ─────────────────────────────────────────
+    # ════════════════════════════════════════════════════════════════════════
+    def _on_translation_key(event):
+        """Replace '--' with '—' when the second '-' is typed."""
+        if event.char != "-":
+            return
+        # Check if the character just before the insertion point is also '-'
+        idx = translation_text.index("insert")
+        # Get one character before current cursor
+        if idx == "1.0":
+            return
+        prev_idx = translation_text.index(f"insert - 1 chars")
+        prev_char = translation_text.get(prev_idx, idx)
+        if prev_char == "-":
+            # Delete the two dashes and insert em-dash
+            # We use edit_separator to keep this as one undoable unit
+            translation_text.edit_separator()
+            translation_text.delete(prev_idx, idx)
+            translation_text.insert(prev_idx, "—")
+            translation_text.edit_separator()
+            return "break"  # suppress the second '-' being inserted normally
+
+    def _on_translation_separator(event):
+        if event.char in (" ", "\t", "\n") or event.keysym in (
+                "BackSpace", "Delete", "Return", "KP_Enter"):
+            root.after_idle(apply_translation_from_widget)
+
+    translation_text.bind("<Key>", _on_translation_key)
+    translation_text.bind("<KeyRelease>", _on_translation_separator)
 
     # ════════════════════════════════════════════════════════════════════════
     # LOGIC
@@ -554,6 +617,11 @@ def run_gui(initial_path: Path = None):
         entries = sorted(data.get("entries", []), key=lambda r: r.get("id", 0))
         state.update(data=data, entries=entries, json_path=json_path,
                      nps_path=nps_path, modified=False, current_id=None)
+        state["entry_history"] = {
+            e.get("id"): {"undo": [e.get("translation", "")], "redo": []}
+            for e in entries
+        }
+        state["history_busy"] = False
         rebuild_tree()
         fname = (nps_path.name if nps_path else None) or (json_path.name if json_path else "")
         root.title(f"NPS Translation Tool — {fname}")
@@ -608,6 +676,19 @@ def run_gui(initial_path: Path = None):
             return
         src = data.get("source_file")
         set_entries_from_data(data, path, Path(src) if src else None)
+
+    def open_file_dialog():
+        fn = filedialog.askopenfilename(
+            title="Open .nps or .json",
+            filetypes=[
+                ("NPS / JSON files", "*.nps *.json"),
+                ("NPS files", "*.nps"),
+                ("JSON files", "*.json"),
+                ("All files", "*.*"),
+            ])
+        if not fn:
+            return
+        open_any_file(Path(fn))
 
     def load_nps(path=None):
         if path is None:
@@ -932,7 +1013,7 @@ def run_gui(initial_path: Path = None):
                      font=("Segoe UI", 9), width=30, anchor="w"
                      ).pack(side=tk.LEFT, padx=(0, 8))
             var = tk.StringVar(value=_aliases_box[0].get(sp, ""))
-            tk.Entry(row, textvariable=var, bg=SURFACE, fg=FG,
+            mk_entry(row, textvariable=var, bg=SURFACE, fg=FG,
                      insertbackground=FG, relief="flat",
                      font=("Segoe UI", 9), width=30,
                      highlightthickness=1,
@@ -1032,20 +1113,16 @@ def run_gui(initial_path: Path = None):
         on_tree_select()
         update_progress()
 
-    def apply_translation_from_widget():
+    def _set_entry_translation(entry_id: int, txt: str):
         entries = state["entries"]
-        cur_id  = state.get("current_id")
-        if not entries or cur_id is None:
-            return
-        txt = translation_text.get("1.0", tk.END).rstrip("\n")
         for e in entries:
-            if e.get("id") == cur_id:
+            if e.get("id") == entry_id:
                 if e.get("translation") != txt:
                     e["translation"] = txt
                     state["modified"] = True
                     for iid in tree.get_children():
                         vals = tree.item(iid, "values")
-                        if int(vals[0]) == cur_id:
+                        if int(vals[0]) == entry_id:
                             tree.set(iid, "translation", txt)
                             stripe   = tree.item(iid, "tags")[0]
                             orig_spk = e.get("speaker", "")
@@ -1061,6 +1138,86 @@ def run_gui(initial_path: Path = None):
                             tree.item(iid, tags=(stripe, ctag))
                             break
                 break
+
+    def _ensure_entry_history(entry_id: int, initial_text: str = ""):
+        hist_map = state["entry_history"]
+        if entry_id not in hist_map:
+            hist_map[entry_id] = {"undo": [initial_text], "redo": []}
+        if not hist_map[entry_id]["undo"]:
+            hist_map[entry_id]["undo"] = [initial_text]
+
+    def apply_translation_from_widget():
+        if state["history_busy"]:
+            return
+        entries = state["entries"]
+        cur_id  = state.get("current_id")
+        if not entries or cur_id is None:
+            return
+        txt = translation_text.get("1.0", tk.END).rstrip("\n")
+        for e in entries:
+            if e.get("id") == cur_id:
+                old = e.get("translation") or ""
+                if old != txt:
+                    _ensure_entry_history(cur_id, old)
+                    hist = state["entry_history"][cur_id]
+                    hist["undo"].append(txt)
+                    if len(hist["undo"]) > 200:
+                        hist["undo"].pop(0)
+                    hist["redo"].clear()
+                    _set_entry_translation(cur_id, txt)
+                break
+
+    def _apply_history_value(entry_id: int, new_txt: str):
+        state["history_busy"] = True
+        try:
+            _set_entry_translation(entry_id, new_txt)
+            if state.get("current_id") == entry_id:
+                translation_text.delete("1.0", tk.END)
+                translation_text.insert(tk.END, new_txt)
+                translation_text.focus_set()
+        finally:
+            state["history_busy"] = False
+        update_progress()
+
+    def undo_action():
+        apply_translation_from_widget()
+        cur_id = state.get("current_id")
+        if cur_id is None:
+            return "break"
+        current_text = next(
+            (e.get("translation", "") for e in state["entries"] if e.get("id") == cur_id),
+            "",
+        )
+        _ensure_entry_history(cur_id, current_text)
+        hist = state["entry_history"][cur_id]
+        if len(hist["undo"]) <= 1:
+            return "break"
+        current = hist["undo"].pop()
+        hist["redo"].append(current)
+        _apply_history_value(cur_id, hist["undo"][-1])
+        set_status("Undo applied")
+        return "break"
+
+    def redo_action():
+        apply_translation_from_widget()
+        cur_id = state.get("current_id")
+        if cur_id is None:
+            return "break"
+        current_text = next(
+            (e.get("translation", "") for e in state["entries"] if e.get("id") == cur_id),
+            "",
+        )
+        _ensure_entry_history(cur_id, current_text)
+        hist = state["entry_history"][cur_id]
+        if not hist["redo"]:
+            return "break"
+        next_text = hist["redo"].pop()
+        hist["undo"].append(next_text)
+        if len(hist["undo"]) > 200:
+            hist["undo"].pop(0)
+        _apply_history_value(cur_id, next_text)
+        set_status("Redo applied")
+        return "break"
 
     def on_tree_select(_event=None):
         apply_translation_from_widget()
@@ -1092,6 +1249,7 @@ def run_gui(initial_path: Path = None):
         original_text.configure(state="disabled")
         translation_text.delete("1.0", tk.END)
         translation_text.insert(tk.END, e.get("translation") or "")
+        _ensure_entry_history(entry_id, e.get("translation") or "")
         translation_text.focus_set()
 
     # ── Search ───────────────────────────────────────────────────────────────
@@ -1134,20 +1292,28 @@ def run_gui(initial_path: Path = None):
             return
         w    = root.focus_get()
         code = event.keycode
+        key  = (event.keysym or "").lower()
         if isinstance(w, (tk.Text, tk.Entry)):
             for k, ev in ((67, "<<Copy>>"), (86, "<<Paste>>"), (88, "<<Cut>>")):
                 if code == k:
                     w.event_generate(ev)
                     return "break"
-            if code == 65:
+            if code == 65 or key == "a":
                 if isinstance(w, tk.Text):
                     w.tag_add("sel", "1.0", "end-1c")
                 else:
                     w.selection_range(0, tk.END)
                 return "break"
-        if code == 83:      # Ctrl+S
+        if code == 83 or key == "s":      # Ctrl+S
             quick_save_json()
             return "break"
+        # Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y — native text undo/redo
+        if code == 90 or key == "z":
+            if event.state & 0x1:  # Shift held
+                return redo_action()
+            return undo_action()
+        if code == 89 or key == "y":
+            return redo_action()
 
     root.bind_all("<KeyPress>", on_ctrl_key)
 
@@ -1182,9 +1348,7 @@ def run_gui(initial_path: Path = None):
     tree.bind("<<TreeviewSelect>>", on_tree_select)
 
     # ── Toolbar buttons ──────────────────────────────────────────────────────
-    mk_btn(tb_left, "📂 Open .nps",  load_nps,                    ACCENT
-           ).pack(side=tk.LEFT, padx=(0, 4))
-    mk_btn(tb_left, "📂 Open .json", load_json,                   SURFACE
+    mk_btn(tb_left, "📂 Open File", open_file_dialog,              ACCENT
            ).pack(side=tk.LEFT, padx=(0, 4))
     mk_btn(tb_left, "💾 Quick Save", quick_save_json,             ACCENT2,
            tooltip="Ctrl+S"
