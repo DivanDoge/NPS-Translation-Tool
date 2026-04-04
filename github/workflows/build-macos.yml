@@ -34,7 +34,7 @@ jobs:
             --onefile \
             --name "NPS Translation Tool" \
             ${{ hashFiles('Locus-logo.png') != '' && '--add-data "Locus-logo.png:."' || '' }} \
-            nps_tool.py
+            NPSTranslationTool.py
 
       # 5. Запакувати .app у zip (щоб можна було завантажити)
       - name: Zip the .app bundle
