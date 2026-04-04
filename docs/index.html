@@ -239,9 +239,6 @@
     min-height: 200px;
     max-height: 42vh;
   }
-  @media (max-width: 640px) {
-    #editor:not(.editor-hidden) { display: block; }
-  }
 
   #editor-meta {
     display: flex;
@@ -516,10 +513,8 @@
 
   /* ── MOBILE ── */
   @media (max-width: 640px) {
-    /* body вже display:flex flex-direction:column height:100dvh — не перевизначаємо */
-    body { font-size: 14px; overflow: hidden; }
+    body { font-size: 14px; overflow: hidden; touch-action: none; }
 
-    /* #main займає весь простір що залишився після toolbar/statusbar/searchbar */
     #main {
       flex: 1;
       min-height: 0;
@@ -528,24 +523,36 @@
       overflow: hidden;
     }
 
-    /* таблиця — фіксована частина зверху, скролиться всередині */
+    /* таблиця займає весь вільний простір; padding-bottom резервує місце
+       під фіксований editor — значення оновлюється через JS (--editor-h) */
     #table-wrap {
-      /* 28% від поточного візуального вьюпорту (оновлюється через --vvh) */
-      flex: 0 0 calc(var(--vvh, 100dvh) * 0.28);
-      min-height: 80px;
-      overflow-y: auto;
-    }
-
-    /* редактор — займає простір що залишився; scroll: scroll (не auto) щоб
-       iOS правильно тримав скрол всередині, а не на сторінці */
-    #editor {
       flex: 1;
       min-height: 0;
-      max-height: none;
-      overflow-y: scroll;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      padding-bottom: var(--editor-h, 220px);
+    }
+
+    /* редактор — фіксований внизу екрану.
+       JS переміщує його через bottom = висота клавіатури,
+       тому він завжди над клавіатурою */
+    #editor {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 50;
+      max-height: 55dvh;
+      overflow-y: auto;
       -webkit-overflow-scrolling: touch;
       overflow-x: hidden;
+      /* скидаємо desktop-стилі */
+      flex-shrink: unset;
+      min-height: unset;
+      border-top: 2px solid var(--border2);
     }
+    #editor:not(.editor-hidden) { display: block; }
 
     #editor-meta {
       display: flex;
@@ -577,20 +584,17 @@
       border-top: 1px solid var(--border);
     }
 
-    /* ta-wrap — просто блок, не flex */
     .ta-wrap {
       display: block;
       overflow: visible;
     }
 
-    /* textarea — auto-grow: висота точно за вмістом, мінімум 3 рядки */
     .editor-textarea.auto-grow {
       display: block;
       width: 100%;
       flex: none;
-      /* height задається через JS autoGrow(), не ставимо тут фіксовано */
-      min-height: 72px;
-      overflow-y: hidden; /* потрібно щоб scrollHeight рахувався правильно */
+      min-height: 60px;
+      overflow-y: hidden;
       font-size: 15px;
       line-height: 1.55;
       padding: 10px;
@@ -841,6 +845,8 @@ function autoGrow(el) {
 function autoGrowAll() {
   autoGrow(document.getElementById('original-ta'));
   autoGrow(document.getElementById('translation-ta'));
+  // після зміни висоти textarea оновлюємо padding таблиці
+  requestAnimationFrame(syncEditorH);
 }
 
 // ─── TRANSLITERATION ─────────────────────────────────────────────────────────
@@ -1378,6 +1384,7 @@ function updateProgress() {
 
 function showEditor() {
   document.getElementById('editor').classList.remove('editor-hidden');
+  requestAnimationFrame(() => { syncVVH(); syncEditorH(); });
 }
 
 // ─── AUTOSAVE (localStorage) ──────────────────────────────────────────────────
@@ -1478,10 +1485,29 @@ window.addEventListener('beforeunload', e => {
 });
 
 // ─── VISUAL VIEWPORT (мобільна клавіатура) ──────────────────────────────────
-// visualViewport.height дає реальну висоту без клавіатури/UI браузера
+// Коли відкривається клавіатура, visualViewport.height зменшується.
+// Ми ставимо editor.style.bottom = keyboardHeight → editor завжди над клавіатурою.
+// --editor-h оновлює padding-bottom таблиці щоб останній рядок не ховався.
+
+function syncEditorH() {
+  const editor = document.getElementById('editor');
+  if (!editor || editor.classList.contains('editor-hidden')) return;
+  const h = editor.getBoundingClientRect().height;
+  const kb = parseInt(editor.style.bottom || '0', 10);
+  document.documentElement.style.setProperty('--editor-h', (h + kb) + 'px');
+}
+
 function syncVVH() {
-  const h = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-  document.documentElement.style.setProperty('--vvh', h + 'px');
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const keyboardH = Math.max(0, window.innerHeight - vv.offsetTop - vv.height);
+  document.documentElement.style.setProperty('--vvh', vv.height + 'px');
+
+  const editor = document.getElementById('editor');
+  if (editor && !editor.classList.contains('editor-hidden')) {
+    editor.style.bottom = keyboardH + 'px';
+    requestAnimationFrame(syncEditorH);
+  }
 }
 if (window.visualViewport) {
   window.visualViewport.addEventListener('resize', syncVVH);
