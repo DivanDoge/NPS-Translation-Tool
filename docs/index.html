@@ -119,6 +119,7 @@
     flex-direction: column;
     flex: 1;
     overflow: hidden;
+    min-height: 0;
   }
 
   /* ── SEARCH BAR ── */
@@ -152,6 +153,7 @@
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
+    min-height: 0;
   }
 
   #table-wrap::-webkit-scrollbar { width: 6px; }
@@ -265,6 +267,7 @@
     flex: 1;
     overflow: hidden;
     gap: 0;
+    min-height: 0;
   }
 
   .editor-col {
@@ -272,6 +275,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-height: 0;
   }
 
   .editor-col + .editor-col {
@@ -310,6 +314,15 @@
   }
   .mini-btn:hover { background: var(--bg4); color: var(--fg); }
 
+  /* десктоп — textarea розтягується у flex контейнері */
+  .ta-wrap {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
   .editor-textarea {
     flex: 1;
     background: var(--bg3);
@@ -321,8 +334,15 @@
     font-size: 13px;
     line-height: 1.6;
     outline: none;
+    min-height: 0;
   }
   .editor-textarea:focus { background: var(--bg4); }
+
+  /* auto-grow — спрацьовує тільки на мобілі через медіа-запит нижче */
+  .editor-textarea.auto-grow {
+    resize: none;
+    overflow: hidden;
+  }
 
   /* ── EMPTY STATE ── */
   #empty-state {
@@ -472,18 +492,143 @@
   }
   #drag-overlay.active { display: flex; }
 
+  /* ── PASTE MODAL TEXTAREA ── */
+  #paste-textarea {
+    width: 100%;
+    height: 200px;
+    background: var(--bg3);
+    color: var(--fg);
+    border: 1px solid var(--border2);
+    border-radius: var(--radius);
+    padding: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    resize: vertical;
+    outline: none;
+  }
+  #paste-textarea:focus { border-color: var(--accent); }
+
   /* ── MOBILE ── */
   @media (max-width: 640px) {
-    #toolbar { gap: 4px; }
+    body { font-size: 14px; height: 100dvh; overflow: hidden; }
+
+    #main {
+      height: calc(100dvh - 112px);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* таблиця — 35% висоти, скролиться всередині */
+    #table-wrap {
+      flex: 0 0 35dvh;
+      min-height: 0;
+      overflow-y: auto;
+    }
+
+    /* редактор — скролюваний блок що залишився */
+    #editor {
+      flex: 1;
+      min-height: 0;
+      max-height: none;
+      overflow-y: auto;
+      overflow-x: hidden;
+      display: block;
+    }
+
+    #editor-meta {
+      display: flex;
+      padding: 5px 8px;
+      flex-wrap: wrap;
+      gap: 3px;
+      position: sticky;
+      top: 0;
+      background: var(--bg2);
+      z-index: 1;
+    }
+
+    /* editor-body — вертикальні колонки, висота за вмістом */
+    #editor-body {
+      display: flex;
+      flex-direction: column;
+      overflow: visible;
+      height: auto;
+    }
+
+    .editor-col {
+      flex: none;
+      overflow: visible;
+      display: block;
+    }
+
+    .editor-col + .editor-col {
+      border-left: none;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ta-wrap — просто блок, не flex */
+    .ta-wrap {
+      display: block;
+      overflow: visible;
+    }
+
+    /* textarea — auto-grow: висота за вмістом, мінімум 3 рядки */
+    .editor-textarea.auto-grow {
+      display: block;
+      width: 100%;
+      flex: none;
+      height: auto;
+      min-height: 72px;
+      overflow: hidden;
+      font-size: 15px;
+      line-height: 1.55;
+      padding: 10px 10px;
+      resize: none;
+    }
+
+    .editor-col-header { padding: 5px 8px; }
+    .editor-col-label  { font-size: 11px; }
+    #editor-speaker    { font-size: 12px; }
+    #editor-info       { font-size: 10px; }
+    #editor-lbl-progress { font-size: 11px; }
+
+    /* toolbar */
+    #toolbar { flex-wrap: wrap; gap: 4px; padding: 6px 8px; }
     #toolbar-title { display: none; }
-    .btn { padding: 5px 7px; font-size: 11px; }
+    #toolbar-right { display: none; }
+    .btn { padding: 6px 9px; font-size: 12px; border-radius: 8px; }
+
+    /* статусбар */
+    #statusbar { font-size: 11px; padding: 2px 8px; }
+
+    /* пошук */
+    #searchbar { padding: 4px 8px; gap: 4px; }
+    #searchbar input { font-size: 13px; padding: 5px 8px; }
+    .mini-btn { padding: 5px 8px; font-size: 12px; min-height: 30px; }
+    #search-count { display: none; }
+
+    /* таблиця колонки */
     th.col-line, td.col-line,
-    th.col-type, td.col-type { display: none; }
-    th.col-id, td.col-id { width: 36px; }
-    th.col-spk, td.col-spk { width: 80px; }
-    #editor-body { flex-direction: column; }
-    .editor-col + .editor-col { border-left: none; border-top: 1px solid var(--border); }
-    #editor { max-height: 55vh; }
+    th.col-type, td.col-type,
+    th.col-id,   td.col-id { display: none; }
+    th.col-spk { width: 80px; }
+    th.col-orig { width: 45%; }
+    td { padding: 7px 7px; font-size: 12px; }
+    thead th { padding: 5px 7px; font-size: 11px; }
+
+    /* модалки знизу */
+    .modal-overlay { padding: 0; align-items: flex-end; }
+    .modal {
+      max-width: 100%;
+      max-height: 90dvh;
+      border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    }
+  }
+
+  @media (hover: none) {
+    .btn      { min-height: 38px; }
+    .mini-btn { min-height: 32px; }
+    tbody tr:active { background: var(--bg4) !important; }
   }
 </style>
 </head>
@@ -497,9 +642,10 @@
   <span id="toolbar-title">NPS TOOL</span>
 
   <button class="btn primary" onclick="triggerOpen('nps,json')">📂 Відкрити</button>
-  <button class="btn" onclick="quickSave()" title="Ctrl+S">💾 Зберегти JSON</button>
-  <button class="btn" onclick="saveNps()">📄 Зберегти .nps</button>
-  <button class="btn success" onclick="triggerImport()">📥 Імпорт перекладу</button>
+  <button class="btn" onclick="quickSave()" title="Ctrl+S">💾 JSON</button>
+  <button class="btn" onclick="saveNps()">📄 .nps</button>
+  <button class="btn success" onclick="triggerImport()">📥 Імпорт</button>
+  <button class="btn" onclick="openPasteModal()" title="Вставити текст .nps з буферу">📋 Вставити текст</button>
 
   <div id="toolbar-right">
     <span id="progress-text"></span>
@@ -565,11 +711,13 @@
         <div class="editor-col-header">
           <span class="editor-col-label">Оригінал</span>
           <div class="editor-col-actions">
-            <button class="mini-btn" onclick="copyOriginal()" title="Копіювати оригінал">⧉ Копіювати</button>
-            <button class="mini-btn" onclick="translitToTranslation()" title="Транслітерувати Latin→Укр">🔤 Трансліт</button>
+            <button class="mini-btn" onclick="copyOriginal()">⧉ Копіювати</button>
+            <button class="mini-btn" onclick="translitToTranslation()">🔤 Трансліт</button>
           </div>
         </div>
-        <textarea id="original-ta" class="editor-textarea" readonly></textarea>
+        <div class="ta-wrap">
+          <textarea id="original-ta" class="editor-textarea auto-grow" readonly></textarea>
+        </div>
       </div>
       <!-- Translation -->
       <div class="editor-col">
@@ -580,14 +728,45 @@
             <button class="mini-btn" onclick="copyTranslation()">⧉ Копіювати</button>
           </div>
         </div>
-        <textarea id="translation-ta" class="editor-textarea"
-          placeholder="Введіть переклад… Enter → наступний рядок"
-          oninput="onTranslationInput()"
-          onkeydown="onTranslationKeyDown(event)"></textarea>
+        <div class="ta-wrap">
+          <textarea id="translation-ta" class="editor-textarea auto-grow"
+            placeholder="Введіть переклад… Enter → наступний рядок"
+            oninput="onTranslationInput()"
+            onkeydown="onTranslationKeyDown(event)"></textarea>
+        </div>
       </div>
     </div>
   </div>
 
+</div>
+
+<!-- PASTE TEXT MODAL -->
+<div id="paste-modal" class="modal-overlay" style="display:none" onclick="closePasteModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <span class="modal-title">Вставити текст .nps</span>
+      <button class="modal-close" onclick="closePasteModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:12px;color:var(--fg3);margin-bottom:10px;line-height:1.6">
+        Відкрий .nps файл у будь-якому текстовому редакторі,<br>
+        виділи весь текст (Ctrl+A / Cmd+A), скопіюй (Ctrl+C / Cmd+C)<br>
+        і встав сюди:
+      </p>
+      <textarea id="paste-textarea" placeholder="Встав сюди вміст .nps файлу..."></textarea>
+    </div>
+    <div class="modal-footer">
+      <label class="checkbox-row" style="margin-right:auto">
+        <input type="text" id="paste-filename" placeholder="назва.nps"
+          style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);color:var(--fg);padding:4px 8px;font-family:inherit;font-size:12px;width:140px;outline:none">
+        <span style="font-size:11px;color:var(--fg3)">ім'я файлу</span>
+      </label>
+      <div style="display:flex;gap:8px">
+        <button class="btn primary" onclick="applyPasteText()">✔ Завантажити</button>
+        <button class="btn" onclick="closePasteModal()">✕ Скасувати</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- IMPORT MODAL -->
@@ -638,6 +817,18 @@ let filteredIds = [];
 let searchMatches = [];
 let searchIdx = -1;
 let pendingImport = [];
+
+// ─── AUTO-GROW TEXTAREAS (mobile) ────────────────────────────────────────────
+function autoGrow(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+
+function autoGrowAll() {
+  autoGrow(document.getElementById('original-ta'));
+  autoGrow(document.getElementById('translation-ta'));
+}
 
 // ─── TRANSLITERATION ─────────────────────────────────────────────────────────
 const TRANSLIT = [
@@ -1000,7 +1191,7 @@ function saveNps() {
   }
   saveCurrentTranslation();
   const result = applyTranslationsToNps(state.npsText, state.entries);
-  const blob = new Blob([result], { type: 'text/plain' });
+  const blob = new Blob([result], { type: 'application/octet-stream' });
   const fname = 'translated_' + (state.npsFilename || 'output.nps');
   downloadBlob(blob, fname);
   setStatus('Збережено: ' + fname);
@@ -1013,6 +1204,29 @@ function downloadBlob(blob, filename) {
   document.body.appendChild(a); a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+// ─── PASTE TEXT MODAL ────────────────────────────────────────────────────────
+function openPasteModal() {
+  document.getElementById('paste-textarea').value = '';
+  document.getElementById('paste-filename').value = '';
+  document.getElementById('paste-modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('paste-textarea').focus(), 100);
+}
+
+function closePasteModal(e) {
+  if (e && e.target !== document.getElementById('paste-modal')) return;
+  document.getElementById('paste-modal').style.display = 'none';
+}
+
+function applyPasteText() {
+  const text = document.getElementById('paste-textarea').value.trim();
+  if (!text) { alert('Встав текст .nps файлу'); return; }
+  let fname = document.getElementById('paste-filename').value.trim();
+  if (!fname) fname = 'pasted.nps';
+  if (!fname.endsWith('.nps')) fname += '.nps';
+  loadNps(text, fname);
+  document.getElementById('paste-modal').style.display = 'none';
 }
 
 // ─── IMPORT ───────────────────────────────────────────────────────────────────
