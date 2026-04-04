@@ -513,7 +513,24 @@
 
   /* ── MOBILE ── */
   @media (max-width: 640px) {
-    body { font-size: 14px; overflow: hidden; touch-action: none; }
+    /*
+     * position:fixed на html+body — єдиний надійний спосіб заблокувати
+     * скрол сторінки на iOS Safari (overflow:hidden сам по собі не допомагає).
+     * Весь скрол — тільки всередині #table-wrap.
+     */
+    html {
+      position: fixed;
+      overflow: hidden;
+      width: 100%;
+      height: 100%;
+    }
+    body {
+      position: fixed;
+      overflow: hidden;
+      width: 100%;
+      height: 100%;
+      font-size: 14px;
+    }
 
     #main {
       flex: 1;
@@ -528,9 +545,10 @@
     #table-wrap {
       flex: 1;
       min-height: 0;
-      overflow-y: auto;
+      overflow-y: scroll;            /* scroll (не auto) — iOS тримає momentum */
       overflow-x: hidden;
       -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;  /* не пробивати скрол до сторінки */
       padding-bottom: var(--editor-h, 220px);
     }
 
@@ -1523,27 +1541,24 @@ window.addEventListener('beforeunload', e => {
 
 // ─── VISUAL VIEWPORT (мобільна клавіатура) ──────────────────────────────────
 // Коли відкривається клавіатура, visualViewport.height зменшується.
-// Ми ставимо editor.style.bottom = keyboardHeight → editor завжди над клавіатурою.
-// --editor-h оновлює padding-bottom таблиці щоб останній рядок не ховався.
+// --editor-h = висота панелі редактора (не залежить від клавіатури).
+// Оновлюється тільки коли змінюється вміст editor (textarea grow).
+// Клавіатура відкривається → тільки editor.style.bottom змінюється → reflow таблиці НЕ відбувається.
 
 function syncEditorH() {
   const editor = document.getElementById('editor');
   if (!editor || editor.classList.contains('editor-hidden')) return;
   const h = editor.getBoundingClientRect().height;
-  const kb = parseInt(editor.style.bottom || '0', 10);
-  document.documentElement.style.setProperty('--editor-h', (h + kb) + 'px');
+  document.documentElement.style.setProperty('--editor-h', h + 'px');
 }
 
 function syncVVH() {
   const vv = window.visualViewport;
   if (!vv) return;
   const keyboardH = Math.max(0, window.innerHeight - vv.offsetTop - vv.height);
-  document.documentElement.style.setProperty('--vvh', vv.height + 'px');
-
   const editor = document.getElementById('editor');
   if (editor && !editor.classList.contains('editor-hidden')) {
     editor.style.bottom = keyboardH + 'px';
-    requestAnimationFrame(syncEditorH);
   }
 }
 if (window.visualViewport) {
