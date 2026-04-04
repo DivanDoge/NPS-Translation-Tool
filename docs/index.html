@@ -510,23 +510,26 @@
 
   /* ── MOBILE ── */
   @media (max-width: 640px) {
-    body { font-size: 14px; height: 100dvh; overflow: hidden; }
+    /* body вже display:flex flex-direction:column height:100dvh — не перевизначаємо */
+    body { font-size: 14px; overflow: hidden; }
 
+    /* #main займає весь простір що залишився після toolbar/statusbar/searchbar */
     #main {
-      height: calc(100dvh - 112px);
+      flex: 1;
+      min-height: 0;
       display: flex;
       flex-direction: column;
       overflow: hidden;
     }
 
-    /* таблиця — 35% висоти, скролиться всередині */
+    /* таблиця — фіксована частина зверху, скролиться всередині */
     #table-wrap {
-      flex: 0 0 35dvh;
+      flex: 0 0 32dvh;
       min-height: 0;
       overflow-y: auto;
     }
 
-    /* редактор — скролюваний блок що залишився */
+    /* редактор — займає простір що залишився, скролиться сам */
     #editor {
       flex: 1;
       min-height: 0;
@@ -572,18 +575,19 @@
       overflow: visible;
     }
 
-    /* textarea — auto-grow: висота за вмістом, мінімум 3 рядки */
+    /* textarea — auto-grow: висота точно за вмістом, мінімум 3 рядки */
     .editor-textarea.auto-grow {
       display: block;
       width: 100%;
       flex: none;
-      height: auto;
+      /* height задається через JS autoGrow(), не ставимо тут фіксовано */
       min-height: 72px;
-      overflow: hidden;
+      overflow-y: hidden; /* потрібно щоб scrollHeight рахувався правильно */
       font-size: 15px;
       line-height: 1.55;
-      padding: 10px 10px;
+      padding: 10px;
       resize: none;
+      box-sizing: border-box;
     }
 
     .editor-col-header { padding: 5px 8px; }
@@ -821,7 +825,8 @@ let pendingImport = [];
 // ─── AUTO-GROW TEXTAREAS (mobile) ────────────────────────────────────────────
 function autoGrow(el) {
   if (!el) return;
-  el.style.height = 'auto';
+  // скидаємо висоту щоб scrollHeight порахувався правильно
+  el.style.height = '0px';
   el.style.height = el.scrollHeight + 'px';
 }
 
@@ -1079,6 +1084,7 @@ function selectEntry(id) {
   document.getElementById('editor-info').textContent = `ID: ${e.id} | тип: ${e.type} | рядок: ${e.line_no}`;
   document.getElementById('original-ta').value = e.original;
   document.getElementById('translation-ta').value = e.translation || '';
+  autoGrowAll();
   document.getElementById('translation-ta').focus();
   updateProgress();
 }
@@ -1127,7 +1133,6 @@ function scrollToSelected() {
 
 // ─── EDITOR EVENTS ────────────────────────────────────────────────────────────
 function onTranslationInput() {
-  // em-dash: replace -- with —
   const ta = document.getElementById('translation-ta');
   const pos = ta.selectionStart;
   const val = ta.value;
@@ -1135,6 +1140,7 @@ function onTranslationInput() {
     ta.value = val.slice(0, pos-2) + '—' + val.slice(pos);
     ta.selectionStart = ta.selectionEnd = pos - 1;
   }
+  autoGrow(ta);
 }
 
 function onTranslationKeyDown(e) {
