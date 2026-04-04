@@ -1,0 +1,51 @@
+name: Build macOS App
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:   # дозволяє запустити вручну з кнопки на GitHub
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      # 1. Завантажити код з репозиторію
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Встановити Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 3. Встановити залежності
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller tkinterdnd2
+
+      # 4. Зібрати .app
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller \
+            --windowed \
+            --onefile \
+            --name "NPS Translation Tool" \
+            ${{ hashFiles('Locus-logo.png') != '' && '--add-data "Locus-logo.png:."' || '' }} \
+            nps_tool.py
+
+      # 5. Запакувати .app у zip (щоб можна було завантажити)
+      - name: Zip the .app bundle
+        run: |
+          cd dist
+          zip -r "NPS-Translation-Tool-macOS.zip" "NPS Translation Tool.app"
+
+      # 6. Викласти zip як artifact для завантаження
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NPS-Translation-Tool-macOS
+          path: dist/NPS-Translation-Tool-macOS.zip
+          retention-days: 30
