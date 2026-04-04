@@ -1,0 +1,1279 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NPS Translation Tool</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Unbounded:wght@400;600&display=swap');
+
+  :root {
+    --bg: #0f0f13;
+    --bg2: #16161c;
+    --bg3: #1e1e26;
+    --bg4: #26262f;
+    --border: #2e2e3a;
+    --border2: #3a3a48;
+    --fg: #e8e8f2;
+    --fg2: #9898b0;
+    --fg3: #5a5a72;
+    --accent: #7c6af7;
+    --accent2: #5a9cf8;
+    --green: #4ec97b;
+    --orange: #e8a24f;
+    --teal: #2dbfa0;
+    --red: #f07178;
+    --cyan: #89ddff;
+    --sel: rgba(124,106,247,0.18);
+    --radius: 8px;
+    --radius-lg: 12px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'JetBrains Mono', monospace;
+    background: var(--bg);
+    color: var(--fg);
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    font-size: 13px;
+  }
+
+  /* ── TOOLBAR ── */
+  #toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+
+  #toolbar-title {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 0.05em;
+    margin-right: 6px;
+    white-space: nowrap;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border2);
+    background: var(--bg3);
+    color: var(--fg);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .btn:hover { background: var(--bg4); border-color: var(--border2); }
+  .btn:active { transform: scale(0.97); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: #6a58e0; }
+  .btn.success { background: var(--teal); border-color: var(--teal); color: #fff; }
+  .btn.success:hover { background: #22a88c; }
+
+  #toolbar-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  #progress-text {
+    font-size: 11px;
+    color: var(--green);
+    font-weight: 500;
+  }
+
+  /* ── STATUS BAR ── */
+  #statusbar {
+    padding: 3px 12px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--fg3);
+    flex-shrink: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ── MAIN LAYOUT ── */
+  #main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── SEARCH BAR ── */
+  #searchbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  #searchbar input {
+    flex: 1;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--fg);
+    padding: 4px 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    outline: none;
+  }
+  #searchbar input:focus { border-color: var(--accent); }
+
+  #search-count { font-size: 11px; color: var(--fg3); min-width: 60px; }
+
+  /* ── TABLE ── */
+  #table-wrap {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  #table-wrap::-webkit-scrollbar { width: 6px; }
+  #table-wrap::-webkit-scrollbar-track { background: var(--bg); }
+  #table-wrap::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  thead th {
+    position: sticky;
+    top: 0;
+    background: var(--bg2);
+    color: var(--fg3);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 6px 8px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    z-index: 2;
+    user-select: none;
+  }
+
+  th.col-id    { width: 48px; text-align: center; }
+  th.col-spk   { width: 110px; }
+  th.col-orig  { width: 35%; }
+  th.col-tr    { width: auto; }
+  th.col-type  { width: 70px; text-align: center; }
+  th.col-line  { width: 52px; text-align: center; }
+
+  tbody tr {
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.08s;
+  }
+  tbody tr:nth-child(even) { background: var(--bg2); }
+  tbody tr:nth-child(odd)  { background: var(--bg); }
+  tbody tr:hover           { background: var(--bg3); }
+  tbody tr.selected        { background: var(--sel) !important; }
+
+  td {
+    padding: 5px 8px;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 0;
+  }
+
+  td.col-id   { text-align: center; color: var(--fg3); }
+  td.col-type { text-align: center; }
+  td.col-line { text-align: center; color: var(--fg3); }
+
+  .tag {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 500;
+  }
+  .tag-voice     { background: rgba(124,106,247,0.2); color: var(--accent); }
+  .tag-narration { background: rgba(232,162,79,0.2);  color: var(--orange); }
+  .tag-choice    { background: rgba(137,221,255,0.2); color: var(--cyan);   }
+
+  /* row colour states */
+  .row-done   td { color: var(--green); }
+  .row-narr   td.col-spk { color: var(--orange); }
+  .row-choice td.col-spk { color: var(--cyan); }
+
+  /* ── EDITOR PANEL ── */
+  #editor {
+    flex-shrink: 0;
+    background: var(--bg2);
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    min-height: 200px;
+    max-height: 42vh;
+  }
+
+  #editor-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  #editor-speaker {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 11px;
+    color: var(--accent2);
+    font-weight: 600;
+  }
+
+  #editor-info { font-size: 11px; color: var(--fg3); }
+
+  #editor-lbl-progress {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--green);
+    font-weight: 500;
+  }
+
+  #editor-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    gap: 0;
+  }
+
+  .editor-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .editor-col + .editor-col {
+    border-left: 1px solid var(--border);
+  }
+
+  .editor-col-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 10px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .editor-col-label {
+    font-size: 11px;
+    color: var(--fg3);
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .editor-col-actions { display: flex; gap: 4px; }
+
+  .mini-btn {
+    padding: 2px 7px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--bg3);
+    color: var(--fg2);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  .mini-btn:hover { background: var(--bg4); color: var(--fg); }
+
+  .editor-textarea {
+    flex: 1;
+    background: var(--bg3);
+    color: var(--fg);
+    border: none;
+    resize: none;
+    padding: 8px 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    outline: none;
+  }
+  .editor-textarea:focus { background: var(--bg4); }
+
+  /* ── EMPTY STATE ── */
+  #empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    gap: 12px;
+    color: var(--fg3);
+    padding: 40px;
+  }
+
+  #empty-state .big-icon {
+    font-size: 48px;
+    opacity: 0.4;
+  }
+
+  #empty-state h2 {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 14px;
+    color: var(--fg2);
+    font-weight: 600;
+  }
+
+  #empty-state p {
+    font-size: 12px;
+    text-align: center;
+    max-width: 320px;
+    line-height: 1.6;
+  }
+
+  /* ── MODAL ── */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+
+  .modal {
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    border-radius: var(--radius-lg);
+    width: 100%;
+    max-width: 640px;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .modal-title {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fg);
+  }
+
+  .modal-close {
+    background: none;
+    border: none;
+    color: var(--fg3);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .modal-close:hover { background: var(--bg3); color: var(--fg); }
+
+  .modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+  }
+  .modal-body::-webkit-scrollbar { width: 5px; }
+  .modal-body::-webkit-scrollbar-track { background: var(--bg2); }
+  .modal-body::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+  .modal-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  /* ── IMPORT PREVIEW TABLE ── */
+  .preview-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .preview-table th {
+    background: var(--bg3);
+    color: var(--fg3);
+    padding: 5px 8px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    font-weight: 500;
+  }
+  .preview-table td {
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border);
+    max-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .preview-table tr.changed td { color: var(--green); }
+  .preview-table tr.same    td { color: var(--fg3); }
+
+  /* ── CHECKBOX ── */
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--fg2);
+  }
+  .checkbox-row input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; }
+
+  /* ── DRAG OVERLAY ── */
+  #drag-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(124,106,247,0.15);
+    border: 3px dashed var(--accent);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Unbounded', sans-serif;
+    font-size: 16px;
+    color: var(--accent);
+    pointer-events: none;
+  }
+  #drag-overlay.active { display: flex; }
+
+  /* ── MOBILE ── */
+  @media (max-width: 640px) {
+    #toolbar { gap: 4px; }
+    #toolbar-title { display: none; }
+    .btn { padding: 5px 7px; font-size: 11px; }
+    th.col-line, td.col-line,
+    th.col-type, td.col-type { display: none; }
+    th.col-id, td.col-id { width: 36px; }
+    th.col-spk, td.col-spk { width: 80px; }
+    #editor-body { flex-direction: column; }
+    .editor-col + .editor-col { border-left: none; border-top: 1px solid var(--border); }
+    #editor { max-height: 55vh; }
+  }
+</style>
+</head>
+<body>
+
+<!-- DRAG OVERLAY -->
+<div id="drag-overlay">Перетягни .nps або .json файл</div>
+
+<!-- TOOLBAR -->
+<div id="toolbar">
+  <span id="toolbar-title">NPS TOOL</span>
+
+  <button class="btn primary" onclick="triggerOpen('nps,json')">📂 Відкрити</button>
+  <button class="btn" onclick="quickSave()" title="Ctrl+S">💾 Зберегти JSON</button>
+  <button class="btn" onclick="saveNps()">📄 Зберегти .nps</button>
+  <button class="btn success" onclick="triggerImport()">📥 Імпорт перекладу</button>
+
+  <div id="toolbar-right">
+    <span id="progress-text"></span>
+  </div>
+</div>
+
+<!-- STATUS -->
+<div id="statusbar" style="display:flex;align-items:center;justify-content:space-between">
+  <span id="status-text">Відкрийте .nps або .json файл щоб почати</span>
+  <span id="autosave-indicator" style="font-size:11px;color:var(--fg3);flex-shrink:0;padding-left:12px"></span>
+</div>
+
+<!-- HIDDEN FILE INPUTS -->
+<input type="file" id="file-open"   accept=".nps,.json" style="display:none" onchange="onFileOpen(this)">
+<input type="file" id="file-import" accept=".nps"       style="display:none" onchange="onFileImport(this)">
+
+<!-- MAIN -->
+<div id="main">
+
+  <!-- SEARCH -->
+  <div id="searchbar">
+    <span style="color:var(--fg3);font-size:13px">🔍</span>
+    <input id="search-input" type="text" placeholder="Пошук по тексту або спікеру..." oninput="onSearch()">
+    <button class="mini-btn" onclick="selectMatch(-1)">◀</button>
+    <button class="mini-btn" onclick="selectMatch(1)">▶</button>
+    <button class="mini-btn" onclick="clearSearch()">✕</button>
+    <span id="search-count"></span>
+  </div>
+
+  <!-- TABLE AREA -->
+  <div id="table-wrap">
+    <div id="empty-state">
+      <div class="big-icon">📜</div>
+      <h2>NPS Translation Tool</h2>
+      <p>Відкрийте .nps файл для початку перекладу або перетягніть файл сюди.<br>Підтримуються також .json сесії.</p>
+      <button class="btn primary" onclick="triggerOpen('nps,json')">📂 Відкрити файл</button>
+    </div>
+    <table id="entries-table" style="display:none">
+      <thead>
+        <tr>
+          <th class="col-id">ID</th>
+          <th class="col-spk">Спікер</th>
+          <th class="col-orig">Оригінал</th>
+          <th class="col-tr">Переклад</th>
+          <th class="col-type">Тип</th>
+          <th class="col-line">Рядок</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <!-- EDITOR -->
+  <div id="editor" style="display:none">
+    <div id="editor-meta">
+      <span id="editor-speaker">—</span>
+      <span id="editor-info" style="color:var(--fg3);font-size:11px"></span>
+      <span id="editor-lbl-progress"></span>
+    </div>
+    <div id="editor-body">
+      <!-- Original -->
+      <div class="editor-col">
+        <div class="editor-col-header">
+          <span class="editor-col-label">Оригінал</span>
+          <div class="editor-col-actions">
+            <button class="mini-btn" onclick="copyOriginal()" title="Копіювати оригінал">⧉ Копіювати</button>
+            <button class="mini-btn" onclick="translitToTranslation()" title="Транслітерувати Latin→Укр">🔤 Трансліт</button>
+          </div>
+        </div>
+        <textarea id="original-ta" class="editor-textarea" readonly></textarea>
+      </div>
+      <!-- Translation -->
+      <div class="editor-col">
+        <div class="editor-col-header">
+          <span class="editor-col-label">Переклад</span>
+          <div class="editor-col-actions">
+            <button class="mini-btn" onclick="clearTranslation()">✕ Очистити</button>
+            <button class="mini-btn" onclick="copyTranslation()">⧉ Копіювати</button>
+          </div>
+        </div>
+        <textarea id="translation-ta" class="editor-textarea"
+          placeholder="Введіть переклад… Enter → наступний рядок"
+          oninput="onTranslationInput()"
+          onkeydown="onTranslationKeyDown(event)"></textarea>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- IMPORT MODAL -->
+<div id="import-modal" class="modal-overlay" style="display:none" onclick="closeImportModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <span class="modal-title">Імпорт перекладу з .nps файлу</span>
+      <button class="modal-close" onclick="closeImportModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p id="import-summary" style="font-size:12px;color:var(--green);margin-bottom:10px;font-weight:500"></p>
+      <p style="font-size:11px;color:var(--fg3);margin-bottom:10px">Перегляд змін (Оригінал → Переклад)</p>
+      <table class="preview-table" id="preview-table">
+        <thead><tr>
+          <th style="width:44px">ID</th>
+          <th>Оригінал</th>
+          <th>Переклад</th>
+        </tr></thead>
+        <tbody id="preview-tbody"></tbody>
+      </table>
+    </div>
+    <div class="modal-footer">
+      <label class="checkbox-row">
+        <input type="checkbox" id="overwrite-cb">
+        Перезаписати існуючі переклади
+      </label>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn success" onclick="applyImport()">✔ Застосувати</button>
+        <button class="btn" onclick="closeImportModal()">✕ Скасувати</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── STATE ───────────────────────────────────────────────────────────────────
+const state = {
+  entries: [],
+  sourceFile: '',
+  currentId: null,
+  modified: false,
+  jsonFilename: '',
+  npsText: '',
+  npsFilename: '',
+};
+
+let filteredIds = [];
+let searchMatches = [];
+let searchIdx = -1;
+let pendingImport = [];
+
+// ─── TRANSLITERATION ─────────────────────────────────────────────────────────
+const TRANSLIT = [
+  ['Shch','Щ'],['shch','щ'],
+  ['Ye','Є'],['Zh','Ж'],['Yi','Ї'],['Kh','Х'],['Ts','Ц'],['Ch','Ч'],['Sh','Ш'],
+  ['Yu','Ю'],['Ya','Я'],
+  ['ye','є'],['zh','ж'],['yi','ї'],['kh','х'],['ts','ц'],['ch','ч'],['sh','ш'],
+  ['yu','ю'],['ya','я'],
+  ['A','А'],['B','Б'],['C','С'],['D','Д'],['E','Е'],['F','Ф'],['G','Г'],['H','Г'],
+  ['I','І'],['J','Й'],['K','К'],['L','Л'],['M','М'],['N','Н'],['O','О'],['P','П'],
+  ['Q','К'],['R','Р'],['S','С'],['T','Т'],['U','У'],['V','В'],['W','В'],['X','КС'],
+  ['Y','И'],['Z','З'],
+  ['a','а'],['b','б'],['c','с'],['d','д'],['e','е'],['f','ф'],['g','г'],['h','г'],
+  ['i','і'],['j','й'],['k','к'],['l','л'],['m','м'],['n','н'],['o','о'],['p','п'],
+  ['q','к'],['r','р'],['s','с'],['t','т'],['u','у'],['v','в'],['w','в'],['x','кс'],
+  ['y','и'],['z','з'],
+];
+TRANSLIT.sort((a,b) => b[0].length - a[0].length);
+
+function transliterate(text) {
+  let res = '', i = 0;
+  while (i < text.length) {
+    let matched = false;
+    for (const [lat, cyr] of TRANSLIT) {
+      if (text.slice(i, i+lat.length) === lat) {
+        res += cyr; i += lat.length; matched = true; break;
+      }
+    }
+    if (!matched) { res += text[i]; i++; }
+  }
+  return res;
+}
+
+// ─── NPS PARSING ─────────────────────────────────────────────────────────────
+function parseNps(text) {
+  const lines = text.split('\n');
+  const entries = [];
+  let id = 0;
+
+  for (let lineno = 0; lineno < lines.length; lineno++) {
+    const line = lines[lineno];
+
+    // voice line
+    const vm = line.match(/<voice\b[^>]*\bname="([^"]+)"[^>]*>(.*)$/i);
+    if (vm) {
+      const speaker = vm[1];
+      const rest = vm[2].replace(/\s*(?:<[^>]*>\s*)*$/, '').trim();
+      if (rest) {
+        entries.push({ id: id++, type: 'voice', line_no: lineno+1, speaker, original: rest, translation: '' });
+      }
+      continue;
+    }
+
+    // choice line
+    if (!line.trimStart().startsWith('//')) {
+      const cm = line.match(/<CHOICE\b[^>]*\bTEXT="([^"]*)"[^>]*><\/A>/i);
+      if (cm && cm[1]) {
+        entries.push({ id: id++, type: 'choice', line_no: lineno+1, speaker: 'CHOICE', original: cm[1], translation: '' });
+        continue;
+      }
+    }
+
+    // narration
+    const stripped = line.trim();
+    if (stripped && !stripped.startsWith('<') && !stripped.startsWith('//')) {
+      const text2 = stripped.replace(/\s*(?:<[^>]*>\s*)*$/, '').trim();
+      if (text2) {
+        entries.push({ id: id++, type: 'narration', line_no: lineno+1, speaker: '', original: text2, translation: '' });
+      }
+    }
+  }
+  return entries;
+}
+
+// ─── APPLY TRANSLATIONS TO NPS TEXT ──────────────────────────────────────────
+function applyTranslationsToNps(npsText, entries) {
+  const lines = npsText.split('\n');
+  const sorted = [...entries].sort((a,b) => a.id - b.id);
+  let it = 0;
+  const out = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    const e = sorted[it];
+    if (!e) { out.push(line); continue; }
+
+    const vm = line.match(/(<voice\b[^>]*\bname="[^"]*"[^>]*>)(.*?)(\s*(?:<[^>]*>\s*)*)$/i);
+    if (vm && e.type === 'voice') {
+      const newText = (e.translation || '').trim() || e.original;
+      line = vm[1] + newText + vm[3];
+      it++;
+    } else {
+      const cm = line.match(/(<CHOICE\b[^>]*\bTEXT=")[^"]*("[^>]*><\/A>.*)/i);
+      if (cm && e.type === 'choice') {
+        const newText = (e.translation || '').trim() || e.original;
+        line = line.replace(/TEXT="[^"]*"/i, `TEXT="${newText}"`);
+        it++;
+      } else {
+        const stripped = line.trim();
+        if (stripped && !stripped.startsWith('<') && !stripped.startsWith('//') && e.type === 'narration') {
+          const indent = line.match(/^(\s*)/)[1];
+          const tail = stripped.match(/(\s*(?:<[^>]*>\s*)*)$/)?.[1] || '';
+          const newText = (e.translation || '').trim() || e.original;
+          line = indent + newText + tail;
+          it++;
+        }
+      }
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+// ─── FILE OPEN ────────────────────────────────────────────────────────────────
+function triggerOpen(accept) {
+  const el = document.getElementById('file-open');
+  el.accept = accept.split(',').map(x => '.'+x).join(',');
+  el.value = '';
+  el.click();
+}
+
+function onFileOpen(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const text = e.target.result;
+    if (file.name.endsWith('.json')) loadJson(text, file.name);
+    else if (file.name.endsWith('.nps')) loadNps(text, file.name);
+    else setStatus('Непідтримуваний формат: ' + file.name);
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+function loadNps(text, filename) {
+  const entries = parseNps(text);
+  state.entries = entries;
+  state.sourceFile = filename;
+  state.npsText = text;
+  state.npsFilename = filename;
+  state.jsonFilename = filename.replace(/\.nps$/i, '.json');
+  state.currentId = null;
+  state.modified = false;
+  renderTable();
+  showEditor();
+  setStatus(`Завантажено: ${filename} | ${entries.length} записів`);
+  updateProgress();
+  scheduleAutosave();
+}
+
+function loadJson(text, filename) {
+  try {
+    const data = JSON.parse(text);
+    state.entries = data.entries || [];
+    state.sourceFile = data.source_file || filename;
+    state.jsonFilename = filename;
+    state.npsFilename = '';
+    state.npsText = '';
+    state.currentId = null;
+    state.modified = false;
+    renderTable();
+    showEditor();
+    setStatus(`Завантажено: ${filename} | ${state.entries.length} записів`);
+    updateProgress();
+  } catch(err) {
+    setStatus('Помилка читання JSON: ' + err.message);
+  }
+}
+
+// ─── RENDER TABLE ─────────────────────────────────────────────────────────────
+const SPEAKER_COLORS = [
+  '#c792ea','#5a9cf8','#e8a24f','#f07178','#89ddff',
+  '#c3e88d','#ff9cac','#82aaff','#ffcb6b','#b2ccd6',
+];
+const speakerColorMap = {};
+
+function getSpeakerColor(spk) {
+  if (!spk) return 'var(--orange)';
+  if (spk === 'CHOICE') return 'var(--cyan)';
+  if (!speakerColorMap[spk]) {
+    speakerColorMap[spk] = SPEAKER_COLORS[Object.keys(speakerColorMap).length % SPEAKER_COLORS.length];
+  }
+  return speakerColorMap[spk];
+}
+
+function renderTable() {
+  const q = document.getElementById('search-input').value.trim().toLowerCase();
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+
+  filteredIds = [];
+
+  for (const e of state.entries) {
+    const displaySpk = e.speaker || 'narrator';
+    if (q) {
+      const haystack = (displaySpk + ' ' + e.original + ' ' + (e.translation||'')).toLowerCase();
+      if (!haystack.includes(q)) continue;
+    }
+    filteredIds.push(e.id);
+
+    const tr = document.createElement('tr');
+    tr.dataset.id = e.id;
+    tr.onclick = () => selectEntry(e.id);
+
+    const hasTr = !!(e.translation||'').trim();
+    if (hasTr) tr.classList.add('row-done');
+    else if (!e.speaker) tr.classList.add('row-narr');
+    else if (e.speaker === 'CHOICE') tr.classList.add('row-choice');
+
+    if (e.id === state.currentId) tr.classList.add('selected');
+
+    const tagClass = `tag-${e.type}`;
+
+    tr.innerHTML = `
+      <td class="col-id">${e.id}</td>
+      <td class="col-spk" style="color:${getSpeakerColor(e.speaker)}">${esc(displaySpk)}</td>
+      <td class="col-orig">${esc(e.original)}</td>
+      <td class="col-tr" style="color:${hasTr?'var(--green)':'var(--fg2)'}">${esc(e.translation||'')}</td>
+      <td class="col-type"><span class="tag ${tagClass}">${e.type}</span></td>
+      <td class="col-line">${e.line_no}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  document.getElementById('empty-state').style.display = state.entries.length ? 'none' : 'flex';
+  document.getElementById('entries-table').style.display = state.entries.length ? '' : 'none';
+  updateSearchCount();
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ─── ENTRY SELECTION ──────────────────────────────────────────────────────────
+function selectEntry(id) {
+  saveCurrentTranslation();
+  state.currentId = id;
+
+  document.querySelectorAll('#tbody tr').forEach(tr => {
+    tr.classList.toggle('selected', Number(tr.dataset.id) === id);
+  });
+
+  const e = state.entries.find(x => x.id === id);
+  if (!e) return;
+
+  document.getElementById('editor-speaker').textContent = e.speaker || 'narrator';
+  document.getElementById('editor-speaker').style.color = getSpeakerColor(e.speaker);
+  document.getElementById('editor-info').textContent = `ID: ${e.id} | тип: ${e.type} | рядок: ${e.line_no}`;
+  document.getElementById('original-ta').value = e.original;
+  document.getElementById('translation-ta').value = e.translation || '';
+  document.getElementById('translation-ta').focus();
+  updateProgress();
+}
+
+function saveCurrentTranslation() {
+  if (state.currentId === null) return;
+  const val = document.getElementById('translation-ta').value;
+  const e = state.entries.find(x => x.id === state.currentId);
+  if (e && e.translation !== val) {
+    e.translation = val;
+    state.modified = true;
+    updateRowInTable(e);
+    updateProgress();
+    scheduleAutosave();
+  }
+}
+
+function updateRowInTable(e) {
+  const tr = document.querySelector(`#tbody tr[data-id="${e.id}"]`);
+  if (!tr) return;
+  const hasTr = !!(e.translation||'').trim();
+  tr.classList.toggle('row-done', hasTr);
+  const tdTr = tr.querySelector('td.col-tr');
+  if (tdTr) {
+    tdTr.textContent = e.translation || '';
+    tdTr.style.color = hasTr ? 'var(--green)' : 'var(--fg2)';
+  }
+}
+
+function navigateEntry(dir) {
+  saveCurrentTranslation();
+  const idx = filteredIds.indexOf(state.currentId);
+  let newIdx = idx + dir;
+  if (newIdx < 0) newIdx = 0;
+  if (newIdx >= filteredIds.length) newIdx = filteredIds.length - 1;
+  if (newIdx === idx) return;
+  const newId = filteredIds[newIdx];
+  selectEntry(newId);
+  scrollToSelected();
+}
+
+function scrollToSelected() {
+  const tr = document.querySelector('#tbody tr.selected');
+  if (tr) tr.scrollIntoView({ block: 'nearest' });
+}
+
+// ─── EDITOR EVENTS ────────────────────────────────────────────────────────────
+function onTranslationInput() {
+  // em-dash: replace -- with —
+  const ta = document.getElementById('translation-ta');
+  const pos = ta.selectionStart;
+  const val = ta.value;
+  if (pos >= 2 && val[pos-1] === '-' && val[pos-2] === '-') {
+    ta.value = val.slice(0, pos-2) + '—' + val.slice(pos);
+    ta.selectionStart = ta.selectionEnd = pos - 1;
+  }
+}
+
+function onTranslationKeyDown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    saveCurrentTranslation();
+    navigateEntry(1);
+  }
+  if (e.key === 'ArrowUp' && e.ctrlKey) { e.preventDefault(); navigateEntry(-1); }
+  if (e.key === 'ArrowDown' && e.ctrlKey) { e.preventDefault(); navigateEntry(1); }
+}
+
+function clearTranslation() {
+  document.getElementById('translation-ta').value = '';
+}
+
+function copyOriginal() {
+  const val = document.getElementById('original-ta').value;
+  navigator.clipboard.writeText(val).then(() => setStatus('Оригінал скопійовано'));
+}
+
+function copyTranslation() {
+  const val = document.getElementById('translation-ta').value;
+  navigator.clipboard.writeText(val).then(() => setStatus('Переклад скопійовано'));
+}
+
+function translitToTranslation() {
+  const orig = document.getElementById('original-ta').value;
+  if (!orig) return;
+  document.getElementById('translation-ta').value = transliterate(orig);
+  document.getElementById('translation-ta').focus();
+  setStatus('Транслітерацію вставлено у поле перекладу');
+}
+
+// ─── SAVE ─────────────────────────────────────────────────────────────────────
+function quickSave() {
+  saveCurrentTranslation();
+  const data = {
+    source_file: state.sourceFile,
+    entries: state.entries,
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const fname = state.jsonFilename || 'translation.json';
+  downloadBlob(blob, fname);
+  state.modified = false;
+  autosave();
+  setStatus('Збережено: ' + fname);
+}
+
+function saveNps() {
+  if (!state.npsText) {
+    alert('Спочатку відкрийте .nps файл (не .json)');
+    return;
+  }
+  saveCurrentTranslation();
+  const result = applyTranslationsToNps(state.npsText, state.entries);
+  const blob = new Blob([result], { type: 'text/plain' });
+  const fname = 'translated_' + (state.npsFilename || 'output.nps');
+  downloadBlob(blob, fname);
+  setStatus('Збережено: ' + fname);
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ─── IMPORT ───────────────────────────────────────────────────────────────────
+function triggerImport() {
+  if (!state.entries.length) { alert('Спочатку відкрийте оригінальний .nps файл'); return; }
+  document.getElementById('file-import').value = '';
+  document.getElementById('file-import').click();
+}
+
+function onFileImport(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const trEntries = parseNps(e.target.result);
+    buildImportPreview(trEntries);
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+function buildImportPreview(trEntries) {
+  pendingImport = trEntries;
+  const tbody = document.getElementById('preview-tbody');
+  tbody.innerHTML = '';
+  let matched = 0;
+  const total = Math.min(state.entries.length, trEntries.length);
+
+  for (let i = 0; i < total; i++) {
+    const orig = state.entries[i];
+    const tr = trEntries[i];
+    const trText = (tr.original || '').trim();
+    const origText = (orig.original || '').trim();
+    const changed = trText && trText !== origText;
+    if (changed) matched++;
+    const row = document.createElement('tr');
+    row.className = changed ? 'changed' : 'same';
+    row.innerHTML = `<td>${orig.id}</td><td>${esc(origText)}</td><td>${esc(trText||'—')}</td>`;
+    tbody.appendChild(row);
+  }
+
+  if (matched === 0) {
+    alert(`Не знайдено відмінностей між файлами.\nПорівняно ${total} записів.`);
+    return;
+  }
+
+  document.getElementById('import-summary').textContent =
+    `Знайдено ${matched} перекладених рядків з ${total} порівняних`;
+  document.getElementById('import-modal').style.display = 'flex';
+}
+
+function applyImport() {
+  saveCurrentTranslation();
+  const overwrite = document.getElementById('overwrite-cb').checked;
+  let applied = 0;
+  const total = Math.min(state.entries.length, pendingImport.length);
+
+  for (let i = 0; i < total; i++) {
+    const orig = state.entries[i];
+    const tr = pendingImport[i];
+    const newTr = (tr.original || '').trim();
+    if (!newTr || newTr === (orig.original||'').trim()) continue;
+    const existing = (orig.translation || '').trim();
+    if (existing && !overwrite) continue;
+    orig.translation = newTr;
+    applied++;
+  }
+
+  state.modified = true;
+  renderTable();
+  updateProgress();
+  closeImportModal();
+  setStatus(`Імпорт завершено — застосовано ${applied} перекладів`);
+  scheduleAutosave();
+}
+
+function closeImportModal(e) {
+  if (e && e.target !== document.getElementById('import-modal')) return;
+  document.getElementById('import-modal').style.display = 'none';
+}
+
+// ─── SEARCH ───────────────────────────────────────────────────────────────────
+function onSearch() {
+  renderTable();
+  searchMatches = [...document.querySelectorAll('#tbody tr')].map(tr => Number(tr.dataset.id));
+  searchIdx = -1;
+  if (searchMatches.length) { searchIdx = 0; highlightMatch(); }
+}
+
+function selectMatch(dir) {
+  if (!searchMatches.length) { onSearch(); return; }
+  searchIdx = (searchIdx + dir + searchMatches.length) % searchMatches.length;
+  highlightMatch();
+}
+
+function highlightMatch() {
+  if (searchIdx < 0 || searchIdx >= searchMatches.length) return;
+  const id = searchMatches[searchIdx];
+  selectEntry(id);
+  scrollToSelected();
+  updateSearchCount();
+}
+
+function clearSearch() {
+  document.getElementById('search-input').value = '';
+  searchMatches = []; searchIdx = -1;
+  renderTable();
+  document.getElementById('search-count').textContent = '';
+}
+
+function updateSearchCount() {
+  const q = document.getElementById('search-input').value.trim();
+  const el = document.getElementById('search-count');
+  if (!q) { el.textContent = ''; return; }
+  const total = document.querySelectorAll('#tbody tr').length;
+  el.textContent = total ? `${searchIdx+1}/${total}` : '0 результатів';
+}
+
+// ─── UI HELPERS ───────────────────────────────────────────────────────────────
+function setStatus(text) {
+  document.getElementById('status-text').textContent = text;
+}
+
+function updateProgress() {
+  const total = state.entries.length;
+  if (!total) { document.getElementById('progress-text').textContent = ''; return; }
+  const done = state.entries.filter(e => (e.translation||'').trim()).length;
+  const pct = Math.round(done/total*100);
+  const text = `${done}/${total} (${pct}%)`;
+  document.getElementById('progress-text').textContent = text;
+  document.getElementById('editor-lbl-progress').textContent = text;
+}
+
+function showEditor() {
+  document.getElementById('editor').style.display = 'flex';
+}
+
+// ─── AUTOSAVE (localStorage) ──────────────────────────────────────────────────
+const AUTOSAVE_KEY = 'nps_tool_autosave';
+let autosaveTimer = null;
+
+function autosave() {
+  if (!state.entries.length) return;
+  saveCurrentTranslation();
+  try {
+    const data = {
+      source_file: state.sourceFile,
+      npsFilename: state.npsFilename,
+      jsonFilename: state.jsonFilename,
+      npsText: state.npsText,
+      currentId: state.currentId,
+      savedAt: new Date().toISOString(),
+      entries: state.entries,
+    };
+    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(data));
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2,'0');
+    const mm = String(now.getMinutes()).padStart(2,'0');
+    const ss = String(now.getSeconds()).padStart(2,'0');
+    document.getElementById('autosave-indicator').textContent = `✦ автозбережено ${hh}:${mm}:${ss}`;
+  } catch(e) {
+    document.getElementById('autosave-indicator').textContent = '⚠ автозбереження недоступне';
+  }
+}
+
+function scheduleAutosave() {
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(autosave, 2000);
+}
+
+function clearAutosave() {
+  localStorage.removeItem(AUTOSAVE_KEY);
+  document.getElementById('autosave-indicator').textContent = '';
+}
+
+function checkAutosaveOnLoad() {
+  try {
+    const raw = localStorage.getItem(AUTOSAVE_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (!data.entries || !data.entries.length) return;
+    const savedAt = data.savedAt ? new Date(data.savedAt).toLocaleString('uk') : '?';
+    const fname = data.jsonFilename || data.npsFilename || data.source_file || 'файл';
+    const ok = confirm(
+      `Знайдено незбережену сесію!\n\n` +
+      `Файл: ${fname}\n` +
+      `Збережено: ${savedAt}\n` +
+      `Записів: ${data.entries.length}\n\n` +
+      `Відновити прогрес?`
+    );
+    if (!ok) { clearAutosave(); return; }
+    state.entries     = data.entries;
+    state.sourceFile  = data.source_file || '';
+    state.npsFilename = data.npsFilename || '';
+    state.jsonFilename= data.jsonFilename || '';
+    state.npsText     = data.npsText || '';
+    state.currentId   = data.currentId ?? null;
+    state.modified    = false;
+    renderTable();
+    showEditor();
+    if (state.currentId !== null) {
+      selectEntry(state.currentId);
+      scrollToSelected();
+    }
+    setStatus(`Відновлено сесію: ${fname} | ${state.entries.length} записів`);
+    updateProgress();
+    document.getElementById('autosave-indicator').textContent = `✦ відновлено (${savedAt})`;
+  } catch(e) {
+    // ignore corrupt autosave
+  }
+}
+
+// ─── KEYBOARD SHORTCUTS ───────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault();
+    quickSave();
+  }
+  if (e.key === 'ArrowUp' && !e.ctrlKey && document.activeElement === document.getElementById('translation-ta')) {
+    // handled inside textarea keydown
+  }
+});
+
+// check for autosaved session on page load
+checkAutosaveOnLoad();
+
+// warn before closing if there are unsaved changes
+window.addEventListener('beforeunload', e => {
+  if (state.modified) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+
+// ─── DRAG & DROP ──────────────────────────────────────────────────────────────
+const overlay = document.getElementById('drag-overlay');
+let dragCount = 0;
+
+document.addEventListener('dragenter', e => {
+  e.preventDefault();
+  dragCount++;
+  overlay.classList.add('active');
+});
+document.addEventListener('dragleave', () => {
+  dragCount--;
+  if (dragCount <= 0) { dragCount = 0; overlay.classList.remove('active'); }
+});
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  dragCount = 0;
+  overlay.classList.remove('active');
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    if (file.name.endsWith('.json')) loadJson(ev.target.result, file.name);
+    else if (file.name.endsWith('.nps')) loadNps(ev.target.result, file.name);
+    else setStatus('Непідтримуваний формат: ' + file.name);
+  };
+  reader.readAsText(file, 'utf-8');
+});
+</script>
+</body>
+</html>
