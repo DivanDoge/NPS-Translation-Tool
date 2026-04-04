@@ -35,12 +35,15 @@
     font-family: 'JetBrains Mono', monospace;
     background: var(--bg);
     color: var(--fg);
-    height: 100dvh;
+    height: var(--vvh, 100dvh);
     display: flex;
     flex-direction: column;
     overflow: hidden;
     font-size: 13px;
   }
+
+  /* прихований стан редактора — керується класом, не inline style */
+  .editor-hidden { display: none !important; }
 
   /* ── TOOLBAR ── */
   #toolbar {
@@ -235,6 +238,9 @@
     flex-direction: column;
     min-height: 200px;
     max-height: 42vh;
+  }
+  @media (max-width: 640px) {
+    #editor:not(.editor-hidden) { display: block; }
   }
 
   #editor-meta {
@@ -524,19 +530,21 @@
 
     /* таблиця — фіксована частина зверху, скролиться всередині */
     #table-wrap {
-      flex: 0 0 32dvh;
-      min-height: 0;
+      /* 28% від поточного візуального вьюпорту (оновлюється через --vvh) */
+      flex: 0 0 calc(var(--vvh, 100dvh) * 0.28);
+      min-height: 80px;
       overflow-y: auto;
     }
 
-    /* редактор — займає простір що залишився, скролиться сам */
+    /* редактор — займає простір що залишився; scroll: scroll (не auto) щоб
+       iOS правильно тримав скрол всередині, а не на сторінці */
     #editor {
       flex: 1;
       min-height: 0;
       max-height: none;
-      overflow-y: auto;
+      overflow-y: scroll;
+      -webkit-overflow-scrolling: touch;
       overflow-x: hidden;
-      display: block;
     }
 
     #editor-meta {
@@ -703,7 +711,7 @@
   </div>
 
   <!-- EDITOR -->
-  <div id="editor" style="display:none">
+  <div id="editor" class="editor-hidden">
     <div id="editor-meta">
       <span id="editor-speaker">—</span>
       <span id="editor-info" style="color:var(--fg3);font-size:11px"></span>
@@ -1085,7 +1093,10 @@ function selectEntry(id) {
   document.getElementById('original-ta').value = e.original;
   document.getElementById('translation-ta').value = e.translation || '';
   autoGrowAll();
-  document.getElementById('translation-ta').focus();
+  const ta = document.getElementById('translation-ta');
+  ta.focus();
+  // на мобілі скролимо поле вводу у видиму зону редактора
+  setTimeout(() => ta.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 80);
   updateProgress();
 }
 
@@ -1366,7 +1377,7 @@ function updateProgress() {
 }
 
 function showEditor() {
-  document.getElementById('editor').style.display = 'flex';
+  document.getElementById('editor').classList.remove('editor-hidden');
 }
 
 // ─── AUTOSAVE (localStorage) ──────────────────────────────────────────────────
@@ -1465,6 +1476,18 @@ window.addEventListener('beforeunload', e => {
     e.returnValue = '';
   }
 });
+
+// ─── VISUAL VIEWPORT (мобільна клавіатура) ──────────────────────────────────
+// visualViewport.height дає реальну висоту без клавіатури/UI браузера
+function syncVVH() {
+  const h = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  document.documentElement.style.setProperty('--vvh', h + 'px');
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', syncVVH);
+  window.visualViewport.addEventListener('scroll', syncVVH);
+}
+syncVVH();
 
 // ─── DRAG & DROP ──────────────────────────────────────────────────────────────
 const overlay = document.getElementById('drag-overlay');
