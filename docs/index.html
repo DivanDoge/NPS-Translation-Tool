@@ -881,81 +881,118 @@ function transliterate(text) {
   return res;
 }
 
-// ─── NPS PARSING ─────────────────────────────────────────────────────────────
+// ─── NPS PARSING (port from NPSTranslationTool.py) ───────────────────────────
+
+// VOICE_LINE_RE: group1=fullTag, group2=speaker, group3=rest
+const _VOICE_RE = /(<voice\b[^>]*\bname="([^"]+)"[^>]*>)(.*)$/i;
+
+function splitVoiceLine(line) {
+  const m = line.match(_VOICE_RE);
+  if (!m) return null;
+  const headFull = m[1], speaker = m[2], rest = m[3];
+  // lazy split: text (before trailing tags) + tail (trailing tags)
+  const m2 = rest.match(/^(.*?)(\s*(?:<[^>]*>\s*)*)$/);
+  if (!m2) return null;
+  const text = m2[1].trim();
+  // head = full tag + leading whitespace of rest (as Python does)
+  const leadWS = rest.length - rest.trimStart().length;
+  const head = headFull + rest.slice(0, leadWS);
+  return { speaker, head, text, tail: m2[2] };
+}
+
+function splitChoiceLine(line) {
+  if (line.trimStart().startsWith('//')) return null;
+  // capture entire remainder after match (including post-</A> content)
+  const m = line.match(/(<CHOICE\b[^>]*\bTEXT="([^"]*)"[^>]*><\/A>.*)$/i);
+  if (!m) return null;
+  return { pre: line.slice(0, m.index), tagAndRest: m[1], text: m[2] };
+}
+
+function splitNarrationLine(line) {
+  const stripped = line.trim();
+  if (!stripped || stripped.startsWith('<') || stripped.startsWith('//')) return null;
+  // lazy match: leading ws | text (lazy) | trailing tags
+  const m = line.match(/^(\s*)(.*?)(\s*(?:<[^>]*>\s*)*)$/);
+  if (!m) return null;
+  const text = m[2].trim();
+  if (!text) return null;
+  return { headWS: m[1], text, tail: m[3] };
+}
+
 function parseNps(text) {
-  const lines = text.split('\n');
+  const lines = text.split(/\r?\n/);
   const entries = [];
   let id = 0;
 
   for (let lineno = 0; lineno < lines.length; lineno++) {
     const line = lines[lineno];
 
-    // voice line
-    const vm = line.match(/<voice\b[^>]*\bname="([^"]+)"[^>]*>(.*)$/i);
-    if (vm) {
-      const speaker = vm[1];
-      const rest = vm[2].replace(/\s*(?:<[^>]*>\s*)*$/, '').trim();
-      if (rest) {
-        entries.push({ id: id++, type: 'voice', line_no: lineno+1, speaker, original: rest, translation: '' });
-      }
+    const vd = splitVoiceLine(line);
+    if (vd) {
+      if (vd.text) entries.push({ id: id++, type: 'voice', line_no: lineno+1, speaker: vd.speaker, original: vd.text, translation: '' });
       continue;
     }
 
-    // choice line
-    if (!line.trimStart().startsWith('//')) {
-      const cm = line.match(/<CHOICE\b[^>]*\bTEXT="([^"]*)"[^>]*><\/A>/i);
-      if (cm && cm[1]) {
-        entries.push({ id: id++, type: 'choice', line_no: lineno+1, speaker: 'CHOICE', original: cm[1], translation: '' });
-        continue;
-      }
+    const cd = splitChoiceLine(line);
+    if (cd) {
+      if (cd.text) entries.push({ id: id++, type: 'choice', line_no: lineno+1, speaker: 'CHOICE', original: cd.text, translation: '' });
+      continue;
     }
 
-    // narration
-    const stripped = line.trim();
-    if (stripped && !stripped.startsWith('<') && !stripped.startsWith('//')) {
-      const text2 = stripped.replace(/\s*(?:<[^>]*>\s*)*$/, '').trim();
-      if (text2) {
-        entries.push({ id: id++, type: 'narration', line_no: lineno+1, speaker: '', original: text2, translation: '' });
-      }
-    }
+    const nd = splitNarrationLine(line);
+    if (nd) entries.push({ id: id++, type: 'narration', line_no: lineno+1, speaker: '', original: nd.text, translation: '' });
   }
   return entries;
 }
 
-// ─── APPLY TRANSLATIONS TO NPS TEXT ──────────────────────────────────────────
+// ─── APPLY TRANSLATIONS TO NPS TEXT (port from apply_translations_json) ───────
 function applyTranslationsToNps(npsText, entries) {
-  const lines = npsText.split('\n');
-  const sorted = [...entries].sort((a,b) => a.id - b.id);
-  let it = 0;
+  const lines = npsText.split(/\r?\n/);
+  const sorted = [...entries].sort((a, b) => a.id - b.id);
+  let idx = 0;
   const out = [];
 
-  for (let i = 0; i < lines.length; i++) {
-    let line = lines[i];
-    const e = sorted[it];
-    if (!e) { out.push(line); continue; }
+  for (const line of lines) {
+    const cur = sorted[idx];
+    if (!cur) { out.push(line); continue; }
 
-    const vm = line.match(/(<voice\b[^>]*\bname="[^"]*"[^>]*>)(.*?)(\s*(?:<[^>]*>\s*)*)$/i);
-    if (vm && e.type === 'voice') {
-      const newText = (e.translation || '').trim() || e.original;
-      line = vm[1] + newText + vm[3];
-      it++;
-    } else {
-      const cm = line.match(/(<CHOICE\b[^>]*\bTEXT=")[^"]*("[^>]*><\/A>.*)/i);
-      if (cm && e.type === 'choice') {
-        const newText = (e.translation || '').trim() || e.original;
-        line = line.replace(/TEXT="[^"]*"/i, `TEXT="${newText}"`);
-        it++;
+    const vd = splitVoiceLine(line);
+    if (vd) {
+      if (cur.type === 'voice') {
+        const newText = (cur.translation || '').trim() || cur.original;
+        out.push(vd.head + newText + vd.tail);
+        idx++;
       } else {
-        const stripped = line.trim();
-        if (stripped && !stripped.startsWith('<') && !stripped.startsWith('//') && e.type === 'narration') {
-          const indent = line.match(/^(\s*)/)[1];
-          const tail = stripped.match(/(\s*(?:<[^>]*>\s*)*)$/)?.[1] || '';
-          const newText = (e.translation || '').trim() || e.original;
-          line = indent + newText + tail;
-          it++;
-        }
+        out.push(line);
       }
+      continue;
     }
+
+    const cd = splitChoiceLine(line);
+    if (cd) {
+      if (cur.type === 'choice') {
+        const newText = (cur.translation || '').trim() || cur.original;
+        const newTag = cd.tagAndRest.replace(/TEXT="[^"]*"/i, `TEXT="${newText}"`);
+        out.push(cd.pre + newTag);
+        idx++;
+      } else {
+        out.push(line);
+      }
+      continue;
+    }
+
+    const nd = splitNarrationLine(line);
+    if (nd) {
+      if (cur.type === 'narration') {
+        const newText = (cur.translation || '').trim() || cur.original;
+        out.push(nd.headWS + newText + nd.tail);
+        idx++;
+      } else {
+        out.push(line);
+      }
+      continue;
+    }
+
     out.push(line);
   }
   return out.join('\n');
