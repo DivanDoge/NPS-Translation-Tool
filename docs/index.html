@@ -447,6 +447,57 @@
     flex-shrink: 0;
   }
 
+  /* ── MOBILE EDITOR MODAL ── */
+  #mobile-editor-modal .modal {
+    max-width: 760px;
+  }
+
+  #mobile-editor-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 11px;
+    color: var(--fg3);
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+
+  #mobile-editor-speaker {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 11px;
+    color: var(--accent2);
+    font-weight: 600;
+  }
+
+  .mobile-editor-pane {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .mobile-editor-pane textarea {
+    width: 100%;
+    background: var(--bg3);
+    color: var(--fg);
+    border: 1px solid var(--border2);
+    border-radius: var(--radius);
+    padding: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    outline: none;
+    resize: none;
+  }
+
+  #mobile-original-ta {
+    min-height: 92px;
+  }
+
+  #mobile-translation-ta {
+    min-height: 132px;
+  }
+
   /* ── IMPORT PREVIEW TABLE ── */
   .preview-table { width: 100%; border-collapse: collapse; font-size: 12px; }
   .preview-table th {
@@ -555,22 +606,7 @@
     /* редактор — фіксований внизу екрану.
        JS переміщує його через bottom = висота клавіатури,
        тому він завжди над клавіатурою */
-    #editor {
-      position: fixed;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      z-index: 50;
-      max-height: 55dvh;
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
-      overflow-x: hidden;
-      /* скидаємо desktop-стилі */
-      flex-shrink: unset;
-      min-height: unset;
-      border-top: 2px solid var(--border2);
-    }
-    #editor:not(.editor-hidden) { display: block; }
+    #editor { display: none !important; }
 
     #editor-meta {
       display: flex;
@@ -656,6 +692,10 @@
       max-width: 100%;
       max-height: 90dvh;
       border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    }
+
+    #mobile-editor-modal .modal {
+      max-height: 94dvh;
     }
   }
 
@@ -774,6 +814,40 @@
 
 </div>
 
+<!-- MOBILE EDITOR MODAL -->
+<div id="mobile-editor-modal" class="modal-overlay" style="display:none" onclick="closeMobileEditor(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <span class="modal-title">Редактор рядка</span>
+      <button class="modal-close" onclick="closeMobileEditor()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="mobile-editor-meta">
+        <span id="mobile-editor-speaker">—</span>
+        <span id="mobile-editor-info">ID: —</span>
+      </div>
+
+      <div class="mobile-editor-pane">
+        <span class="editor-col-label">Оригінал</span>
+        <textarea id="mobile-original-ta" readonly></textarea>
+      </div>
+
+      <div class="mobile-editor-pane">
+        <span class="editor-col-label">Переклад</span>
+        <textarea id="mobile-translation-ta"
+          placeholder="Введіть переклад… Enter → наступний рядок"
+          oninput="onTranslationInput(this)"
+          onkeydown="onTranslationKeyDown(event)"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="navigateEntry(-1)">◀ Попередній</button>
+      <button class="btn success" onclick="navigateEntry(1)">Наступний ▶</button>
+      <button class="btn" onclick="saveCurrentTranslation(); closeMobileEditor()" style="margin-left:auto">✔ Готово</button>
+    </div>
+  </div>
+</div>
+
 <!-- PASTE TEXT MODAL -->
 <div id="paste-modal" class="modal-overlay" style="display:none" onclick="closePasteModal(event)">
   <div class="modal" onclick="event.stopPropagation()">
@@ -852,6 +926,32 @@ let searchMatches = [];
 let searchIdx = -1;
 let pendingImport = [];
 
+function isMobileView() {
+  return window.matchMedia('(max-width: 640px)').matches;
+}
+
+function getTranslationTextarea() {
+  if (isMobileView()) return document.getElementById('mobile-translation-ta');
+  return document.getElementById('translation-ta');
+}
+
+function getOriginalTextarea() {
+  if (isMobileView()) return document.getElementById('mobile-original-ta');
+  return document.getElementById('original-ta');
+}
+
+function openMobileEditor() {
+  if (!isMobileView()) return;
+  document.getElementById('mobile-editor-modal').style.display = 'flex';
+}
+
+function closeMobileEditor(e) {
+  const modal = document.getElementById('mobile-editor-modal');
+  if (e && e.target !== modal) return;
+  saveCurrentTranslation();
+  modal.style.display = 'none';
+}
+
 // ─── AUTO-GROW TEXTAREAS (mobile) ────────────────────────────────────────────
 function autoGrow(el) {
   if (!el) return;
@@ -903,19 +1003,42 @@ function transliterate(text) {
 
 // VOICE_LINE_RE: group1=fullTag, group2=speaker, group3=rest
 const _VOICE_RE = /(<voice\b[^>]*\bname="([^"]+)"[^>]*>)(.*)$/i;
+const _TRAILING_TAG_RE = /(\s*)(<[^>]+>)(\s*)$/;
+
+function splitTextAndTailTags(text) {
+  // Keep inline italic tags inside translatable text.
+  const keepInline = new Set(['i', 'ii']);
+  let working = text;
+  const tailParts = [];
+
+  while (true) {
+    const m = working.match(_TRAILING_TAG_RE);
+    if (!m) break;
+
+    const tag = m[2];
+    const nm = tag.match(/^<\/?\s*([A-Za-z0-9_:-]+)/);
+    if (!nm) break;
+
+    const tagName = nm[1].toLowerCase();
+    if (keepInline.has(tagName)) break;
+
+    tailParts.unshift(m[1] + tag + m[3]);
+    working = working.slice(0, working.length - (m[1] + tag + m[3]).length);
+  }
+
+  return { text: working.trim(), tail: tailParts.join('') };
+}
 
 function splitVoiceLine(line) {
   const m = line.match(_VOICE_RE);
   if (!m) return null;
   const headFull = m[1], speaker = m[2], rest = m[3];
-  // lazy split: text (before trailing tags) + tail (trailing tags)
-  const m2 = rest.match(/^(.*?)(\s*(?:<[^>]*>\s*)*)$/);
-  if (!m2) return null;
-  const text = m2[1].trim();
+  const split = splitTextAndTailTags(rest);
+  const text = split.text;
   // head = full tag + leading whitespace of rest (as Python does)
   const leadWS = rest.length - rest.trimStart().length;
   const head = headFull + rest.slice(0, leadWS);
-  return { speaker, head, text, tail: m2[2] };
+  return { speaker, head, text, tail: split.tail };
 }
 
 function splitChoiceLine(line) {
@@ -928,13 +1051,16 @@ function splitChoiceLine(line) {
 
 function splitNarrationLine(line) {
   const stripped = line.trim();
-  if (!stripped || stripped.startsWith('<') || stripped.startsWith('//')) return null;
-  // lazy match: leading ws | text (lazy) | trailing tags
-  const m = line.match(/^(\s*)(.*?)(\s*(?:<[^>]*>\s*)*)$/);
+  if (!stripped || stripped.startsWith('//')) return null;
+  if (stripped.startsWith('<') && !/^<\s*\/?\s*i\b|^<\s*ii\b/i.test(stripped)) return null;
+
+  const m = line.match(/^(\s*)(.*)$/);
   if (!m) return null;
-  const text = m[2].trim();
-  if (!text) return null;
-  return { headWS: m[1], text, tail: m[3] };
+  const headWS = m[1], body = m[2];
+  const split = splitTextAndTailTags(body);
+  const text = split.text;
+  if (!text || /^(?:\s*<[^>]+>\s*)+$/.test(text)) return null;
+  return { headWS, text, tail: split.tail };
 }
 
 function parseNps(text) {
@@ -1153,8 +1279,16 @@ function selectEntry(id) {
   document.getElementById('editor-info').textContent = `ID: ${e.id} | тип: ${e.type} | рядок: ${e.line_no}`;
   document.getElementById('original-ta').value = e.original;
   document.getElementById('translation-ta').value = e.translation || '';
+
+  document.getElementById('mobile-editor-speaker').textContent = e.speaker || 'narrator';
+  document.getElementById('mobile-editor-speaker').style.color = getSpeakerColor(e.speaker);
+  document.getElementById('mobile-editor-info').textContent = `ID: ${e.id} | тип: ${e.type} | рядок: ${e.line_no}`;
+  document.getElementById('mobile-original-ta').value = e.original;
+  document.getElementById('mobile-translation-ta').value = e.translation || '';
+
   autoGrowAll();
-  const ta = document.getElementById('translation-ta');
+  const ta = getTranslationTextarea();
+  if (isMobileView()) openMobileEditor();
   ta.focus();
   // на мобілі скролимо поле вводу у видиму зону редактора
   setTimeout(() => ta.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 80);
@@ -1163,7 +1297,7 @@ function selectEntry(id) {
 
 function saveCurrentTranslation() {
   if (state.currentId === null) return;
-  const val = document.getElementById('translation-ta').value;
+  const val = getTranslationTextarea().value;
   const e = state.entries.find(x => x.id === state.currentId);
   if (e && e.translation !== val) {
     e.translation = val;
@@ -1204,8 +1338,8 @@ function scrollToSelected() {
 }
 
 // ─── EDITOR EVENTS ────────────────────────────────────────────────────────────
-function onTranslationInput() {
-  const ta = document.getElementById('translation-ta');
+function onTranslationInput(el) {
+  const ta = el || getTranslationTextarea();
   const pos = ta.selectionStart;
   const val = ta.value;
   if (pos >= 2 && val[pos-1] === '-' && val[pos-2] === '-') {
@@ -1227,23 +1361,25 @@ function onTranslationKeyDown(e) {
 
 function clearTranslation() {
   document.getElementById('translation-ta').value = '';
+  document.getElementById('mobile-translation-ta').value = '';
 }
 
 function copyOriginal() {
-  const val = document.getElementById('original-ta').value;
+  const val = getOriginalTextarea().value;
   navigator.clipboard.writeText(val).then(() => setStatus('Оригінал скопійовано'));
 }
 
 function copyTranslation() {
-  const val = document.getElementById('translation-ta').value;
+  const val = getTranslationTextarea().value;
   navigator.clipboard.writeText(val).then(() => setStatus('Переклад скопійовано'));
 }
 
 function translitToTranslation() {
-  const orig = document.getElementById('original-ta').value;
+  const orig = getOriginalTextarea().value;
   if (!orig) return;
-  document.getElementById('translation-ta').value = transliterate(orig);
-  document.getElementById('translation-ta').focus();
+  const tr = getTranslationTextarea();
+  tr.value = transliterate(orig);
+  tr.focus();
   setStatus('Транслітерацію вставлено у поле перекладу');
 }
 
@@ -1438,6 +1574,10 @@ function updateProgress() {
 }
 
 function showEditor() {
+  if (isMobileView()) {
+    document.getElementById('editor').classList.add('editor-hidden');
+    return;
+  }
   document.getElementById('editor').classList.remove('editor-hidden');
   requestAnimationFrame(() => { syncVVH(); syncEditorH(); });
 }
@@ -1523,7 +1663,7 @@ document.addEventListener('keydown', e => {
     e.preventDefault();
     quickSave();
   }
-  if (e.key === 'ArrowUp' && !e.ctrlKey && document.activeElement === document.getElementById('translation-ta')) {
+  if (e.key === 'ArrowUp' && !e.ctrlKey && document.activeElement === getTranslationTextarea()) {
     // handled inside textarea keydown
   }
 });

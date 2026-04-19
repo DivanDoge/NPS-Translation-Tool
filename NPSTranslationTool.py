@@ -1,6 +1,8 @@
 import json
+import random
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 # ── tkinterdnd2: must wrap Tk BEFORE creating the root window ────────────────
@@ -17,7 +19,7 @@ except Exception:
     tk = None
 
 
-APP_VERSION   = "1.4.0"
+APP_VERSION   = "1.5.2"
 
 def _get_aliases_file() -> Path:
     import os
@@ -121,6 +123,35 @@ def transliterate_latin_to_ua(text: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 VOICE_LINE_RE  = re.compile(r'(<voice\b[^>]*\bname="([^"]+)"[^>]*>)(.*)$', re.IGNORECASE)
 CHOICE_LINE_RE = re.compile(r'(?i)^(?!\s*//)(.*)(<CHOICE\b[^>]*\bTEXT="([^"]*)"[^>]*></A>//?.*)$')
+_TRAILING_TAG_RE = re.compile(r'(\s*)(<[^>]+>)(\s*)$')
+
+
+def split_text_and_tail_tags(text: str):
+    """
+    Split a line tail into translatable text and trailing control tags.
+    Keep italic tags (<I>, </I>, <II>) inside the translatable text.
+    """
+    keep_inline = {"i", "ii"}
+    working = text
+    tail_parts = []
+
+    while True:
+        m = _TRAILING_TAG_RE.search(working)
+        if not m:
+            break
+        tag = m.group(2)
+        nm = re.match(r'</?\s*([A-Za-z0-9_:-]+)', tag)
+        if not nm:
+            break
+        tag_name = nm.group(1).lower()
+        if tag_name in keep_inline:
+            break
+
+        consumed = m.group(1) + tag + m.group(3)
+        tail_parts.insert(0, consumed)
+        working = working[:m.start()]
+
+    return working.strip(), "".join(tail_parts)
 
 
 def split_voice_line(line: str):
@@ -128,11 +159,7 @@ def split_voice_line(line: str):
     if not m:
         return None
     head_full, speaker, rest = m.groups()
-    m2 = re.match(r'(.*?)(\s*(?:<[^>]*>\s*)*)$', rest)
-    if not m2:
-        return None
-    text_part, tail_tags = m2.groups()
-    text = text_part.strip()
+    text, tail_tags = split_text_and_tail_tags(rest)
     head = head_full + rest[: len(rest) - len(rest.lstrip())]
     return speaker, head, text, tail_tags
 
@@ -152,14 +179,18 @@ def split_choice_line(line: str):
 
 def split_narration_line(line: str):
     stripped = line.strip()
-    if not stripped or stripped.startswith('<') or stripped.startswith('//'):
+    if not stripped or stripped.startswith('//'):
         return None
-    m = re.match(r'(\s*)(.*?)(\s*(?:<[^>]*>\s*)*)$', line)
+    if stripped.startswith('<') and not re.match(r'(?i)^<\s*/?\s*i\b|^<\s*ii\b', stripped):
+        return None
+
+    m = re.match(r'(\s*)(.*)$', line)
     if not m:
         return None
-    head_ws, text_part, tail_tags = m.groups()
-    text = text_part.strip()
-    if not text:
+    head_ws, body = m.groups()
+
+    text, tail_tags = split_text_and_tail_tags(body)
+    if not text or re.fullmatch(r'(?:\s*<[^>]+>\s*)+', text):
         return None
     return head_ws, text, tail_tags
 
@@ -313,19 +344,20 @@ def run_gui(initial_path: Path = None):
     root.minsize(900, 600)
 
     # ── Colour palette ───────────────────────────────────────────────────────
-    BG      = "#16161a"
-    PANEL   = "#1f1f23"
-    SURFACE = "#27272c"
-    BORDER  = "#38383f"
-    FG      = "#e8e8f0"
-    FG_DIM  = "#888899"
-    ACCENT  = "#7c6af7"
-    ACCENT2 = "#5a9cf8"
-    GREEN   = "#4ec97b"
-    ORANGE  = "#e8a24f"
-    SEL_BG  = "#3a3460"
-    BTN_HO  = "#3c3c44"
-    TEAL    = "#2a7a6f"
+    BG      = "#0d1117"
+    PANEL   = "#161b22"
+    SURFACE = "#21262d"
+    BORDER  = "#30363d"
+    FG      = "#c9d1d9"
+    FG_DIM  = "#8b949e"
+    ACCENT  = "#2f81f7"
+    ACCENT2 = "#238636"
+    GREEN   = "#3fb950"
+    ORANGE  = "#d29922"
+    SEL_BG  = "#1f2a3a"
+    BTN_HO  = "#30363d"
+    TEAL    = "#1f6feb"
+    UI_FONT = "Trebuchet MS"
 
     root.configure(bg=BG)
 
@@ -335,24 +367,29 @@ def run_gui(initial_path: Path = None):
     except Exception:
         pass
     style.configure("Treeview", background=SURFACE, foreground=FG,
-                    fieldbackground=SURFACE, rowheight=24, borderwidth=0,
-                    font=("Segoe UI", 9))
+                    fieldbackground=SURFACE, rowheight=25, borderwidth=0,
+                    font=(UI_FONT, 10))
     style.map("Treeview",
               background=[("selected", SEL_BG)],
               foreground=[("selected", FG)])
     style.configure("Treeview.Heading", background=PANEL, foreground=FG_DIM,
-                    relief="flat", font=("Segoe UI", 9, "bold"))
+                    relief="flat", font=(UI_FONT, 10, "bold"))
     style.map("Treeview.Heading", background=[("active", BORDER)])
     for ori in ("Vertical", "Horizontal"):
         style.configure(f"{ori}.TScrollbar", background=PANEL, troughcolor=BG,
                         bordercolor=BG, arrowcolor=FG_DIM, relief="flat")
+    style.configure("Accent.Horizontal.TProgressbar",
+                    troughcolor=SURFACE, background=ACCENT,
+                    bordercolor=SURFACE, lightcolor=ACCENT, darkcolor=ACCENT)
 
     # ── Widget helpers ───────────────────────────────────────────────────────
     def mk_btn(parent, text, cmd, color=ACCENT, width=None, tooltip=None):
+        btn_fg = "#ffffff" if color in (ACCENT, ACCENT2, TEAL, GREEN) else FG
         kw = dict(text=text, command=cmd, bg=color, fg=FG,
-                  activebackground=BTN_HO, activeforeground=FG,
+                  activebackground=BTN_HO, activeforeground=btn_fg,
                   relief="flat", bd=0, cursor="hand2",
-                  padx=10, pady=5, font=("Segoe UI", 9))
+                  padx=10, pady=5, font=(UI_FONT, 10))
+        kw["fg"] = btn_fg
         if width:
             kw["width"] = width
         b = tk.Button(parent, **kw)
@@ -363,7 +400,7 @@ def run_gui(initial_path: Path = None):
     def mk_label(parent, text, **kw):
         return tk.Label(parent, text=text,
                         bg=kw.pop("bg", BG), fg=kw.pop("fg", FG_DIM),
-                        font=("Segoe UI", 9), **kw)
+                        font=(UI_FONT, 10), **kw)
 
     def mk_entry(parent, **kw):
         # Some Tk builds do not support Entry undo/maxundo options.
@@ -381,8 +418,8 @@ def run_gui(initial_path: Path = None):
             tip_win[0] = tk.Toplevel(widget)
             tip_win[0].wm_overrideredirect(True)
             tip_win[0].wm_geometry(f"+{e.x_root+12}+{e.y_root+8}")
-            tk.Label(tip_win[0], text=tip_text, bg="#2a2a30", fg=FG,
-                     relief="solid", bd=1, font=("Segoe UI", 8), padx=4, pady=2).pack()
+            tk.Label(tip_win[0], text=tip_text, bg="#30363d", fg="#c9d1d9",
+                     relief="solid", bd=1, font=(UI_FONT, 9), padx=4, pady=2).pack()
         def hide(e):
             if tip_win[0]:
                 tip_win[0].destroy()
@@ -403,7 +440,35 @@ def run_gui(initial_path: Path = None):
         "data": None, "entries": [], "json_path": None,
         "nps_path": None, "current_id": None, "modified": False,
         "entry_history": {}, "history_busy": False,
+        "filter": "all",
     }
+
+    def _entry_matches_filter(entry: dict) -> bool:
+        mode = state.get("filter", "all")
+        has_tr = bool((entry.get("translation") or "").strip())
+        if mode == "all":
+            return True
+        if mode == "todo":
+            return not has_tr
+        if mode == "done":
+            return has_tr
+        if mode == "voice":
+            return entry.get("type") == "voice"
+        if mode == "narration":
+            return entry.get("type") == "narration"
+        if mode == "choice":
+            return entry.get("type") == "choice"
+        return True
+
+    def _refresh_window_title():
+        fname = ""
+        if state.get("nps_path"):
+            fname = state["nps_path"].name
+        elif state.get("json_path"):
+            fname = state["json_path"].name
+        dirty = " *" if state.get("modified") else ""
+        suffix = f" - {fname}" if fname else ""
+        root.title(f"NPS Translation Tool{dirty}{suffix}")
 
     # ════════════════════════════════════════════════════════════════════════
     # LAYOUT
@@ -413,14 +478,14 @@ def run_gui(initial_path: Path = None):
     toolbar.pack(fill=tk.X)
     tb_left = tk.Frame(toolbar, bg=PANEL)
     tb_left.pack(side=tk.LEFT, padx=10)
-    tk.Label(toolbar, text=f"v{APP_VERSION}", bg=PANEL, fg="#444455",
-             font=("Segoe UI", 8)).pack(side=tk.RIGHT, padx=10)
+    tk.Label(toolbar, text=f"v{APP_VERSION}", bg=PANEL, fg=FG_DIM,
+             font=(UI_FONT, 9)).pack(side=tk.RIGHT, padx=10)
 
     tk.Frame(root, bg=BORDER, height=1).pack(fill=tk.X)
     lbl_status = tk.Label(
         root,
         text="No file loaded — drag a .nps or .json here, or use the buttons above",
-        bg=PANEL, fg=FG_DIM, font=("Segoe UI", 8), anchor="w", padx=8, pady=3)
+        bg=PANEL, fg=FG_DIM, font=(UI_FONT, 9), anchor="w", padx=10, pady=5)
     lbl_status.pack(fill=tk.X)
 
     main_pane = tk.PanedWindow(root, orient=tk.VERTICAL, bg=BG,
@@ -437,7 +502,7 @@ def run_gui(initial_path: Path = None):
     search_var = tk.StringVar()
     search_entry = mk_entry(search_bar, textvariable=search_var, bg=SURFACE, fg=FG,
                             insertbackground=FG, relief="flat", bd=0,
-                            font=("Segoe UI", 9), highlightthickness=1,
+                            font=(UI_FONT, 10), highlightthickness=1,
                             highlightbackground=BORDER, highlightcolor=ACCENT)
     search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
     mk_btn(search_bar, "◀", lambda: select_match(-1), SURFACE).pack(side=tk.LEFT, padx=2)
@@ -445,6 +510,41 @@ def run_gui(initial_path: Path = None):
     mk_btn(search_bar, "✕",
            lambda: (search_var.set(""), rebuild_search_matches()), SURFACE
            ).pack(side=tk.LEFT, padx=(2, 8))
+    search_count_var = tk.StringVar(value="Matches: 0")
+    tk.Label(search_bar, textvariable=search_count_var, bg=PANEL, fg=FG_DIM,
+             font=(UI_FONT, 9, "bold")).pack(side=tk.RIGHT, padx=(0, 10))
+
+    filter_bar = tk.Frame(top_pane, bg=BG)
+    filter_bar.pack(fill=tk.X, padx=8, pady=(6, 4))
+    mk_label(filter_bar, "Show:", bg=BG, fg=FG_DIM).pack(side=tk.LEFT, padx=(0, 6))
+    filter_buttons = {}
+
+    def _set_filter(mode: str):
+        state["filter"] = mode
+        _update_filter_buttons()
+        rebuild_tree()
+        set_status(f"Filter: {mode}")
+
+    def _update_filter_buttons():
+        current = state.get("filter", "all")
+        for mode, btn in filter_buttons.items():
+            if mode == current:
+                btn.configure(bg=ACCENT, fg="#ffffff")
+            else:
+                btn.configure(bg=SURFACE, fg=FG)
+
+    for mode, title in [
+        ("all", "All"),
+        ("todo", "Untranslated"),
+        ("done", "Translated"),
+        ("voice", "Voice"),
+        ("narration", "Narration"),
+        ("choice", "Choices"),
+    ]:
+        btn = mk_btn(filter_bar, title, lambda m=mode: _set_filter(m), SURFACE)
+        btn.pack(side=tk.LEFT, padx=(0, 4))
+        filter_buttons[mode] = btn
+    _update_filter_buttons()
 
     tree_frame = tk.Frame(top_pane, bg=BG)
     tree_frame.pack(fill=tk.BOTH, expand=True)
@@ -463,12 +563,12 @@ def run_gui(initial_path: Path = None):
         tree.heading(col, text=heading, anchor=anch)
         tree.column(col, width=w, anchor=anch, stretch=stretch)
 
-    tree.tag_configure("odd",      background="#1d1d22")
-    tree.tag_configure("even",     background="#23232a")
+    tree.tag_configure("odd",      background="#0d1117")
+    tree.tag_configure("even",     background="#161b22")
     tree.tag_configure("done",     foreground=GREEN)
     tree.tag_configure("empty",    foreground=FG_DIM)
     tree.tag_configure("narrator", foreground=ORANGE)
-    tree.tag_configure("choice",   foreground="#89ddff")
+    tree.tag_configure("choice",   foreground="#58a6ff")
 
     _SPEAKER_COLOURS = [
         "#c792ea", "#5a9cf8", "#e8a24f", "#f07178", "#89ddff",
@@ -494,7 +594,7 @@ def run_gui(initial_path: Path = None):
     mk_label(speaker_row, "Speaker:", bg=PANEL, fg=FG_DIM).pack(side=tk.LEFT, padx=(10, 4))
     speaker_var = tk.StringVar()
     tk.Label(speaker_row, textvariable=speaker_var, bg=PANEL, fg=ACCENT2,
-             font=("Segoe UI", 9, "bold"), anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
+             font=(UI_FONT, 10, "bold"), anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
     mk_btn(speaker_row, "✏ Rename Speaker", lambda: open_alias_editor(), SURFACE,
            tooltip="Set display alias for speakers (only visible in app)"
            ).pack(side=tk.RIGHT, padx=8)
@@ -502,11 +602,14 @@ def run_gui(initial_path: Path = None):
     progress_row = tk.Frame(bot_pane, bg=BG)
     progress_row.pack(fill=tk.X, padx=8, pady=(2, 0))
     lbl_info = tk.Label(progress_row, text="", bg=BG, fg=FG_DIM,
-                        font=("Segoe UI", 8), anchor="w")
+                        font=(UI_FONT, 9), anchor="w")
     lbl_info.pack(side=tk.LEFT)
     lbl_progress = tk.Label(progress_row, text="", bg=BG, fg=GREEN,
-                            font=("Segoe UI", 8, "bold"), anchor="e")
+                            font=(UI_FONT, 9, "bold"), anchor="e")
     lbl_progress.pack(side=tk.RIGHT)
+    progress_bar = ttk.Progressbar(bot_pane, mode="determinate", maximum=100,
+                                   style="Accent.Horizontal.TProgressbar")
+    progress_bar.pack(fill=tk.X, padx=8, pady=(3, 0))
 
     # Original text block
     orig_frame = tk.Frame(bot_pane, bg=BG)
@@ -525,7 +628,7 @@ def run_gui(initial_path: Path = None):
 
     original_text = tk.Text(orig_frame, height=3, wrap="word",
                             bg=SURFACE, fg=FG, insertbackground=FG,
-                            relief="flat", bd=0, font=("Segoe UI", 10),
+                            relief="flat", bd=0, font=(UI_FONT, 10),
                             padx=8, pady=6, highlightthickness=1,
                             highlightbackground=BORDER, highlightcolor=BORDER,
                             selectbackground=SEL_BG)
@@ -539,7 +642,7 @@ def run_gui(initial_path: Path = None):
     tr_header.pack(fill=tk.X)
     mk_label(tr_header, "Translation", bg=BG, fg=FG_DIM).pack(side=tk.LEFT)
     tk.Label(tr_header, text="↑↓ navigate  •  Enter → next  •  -- → —",
-             bg=BG, fg="#444455", font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(10, 0))
+             bg=BG, fg=FG_DIM, font=(UI_FONT, 9)).pack(side=tk.LEFT, padx=(10, 0))
 
     mk_btn(tr_header, "⧉ Copy",
            lambda: _copy_translation(), SURFACE,
@@ -558,7 +661,7 @@ def run_gui(initial_path: Path = None):
 
     translation_text = tk.Text(tr_frame, height=3, wrap="word",
                                bg=SURFACE, fg=FG, insertbackground=FG,
-                               relief="flat", bd=0, font=("Segoe UI", 10),
+                               relief="flat", bd=0, font=(UI_FONT, 10),
                                padx=8, pady=6, highlightthickness=1,
                                highlightbackground=BORDER, highlightcolor=ACCENT,
                                selectbackground=SEL_BG)
@@ -608,10 +711,13 @@ def run_gui(initial_path: Path = None):
         entries = state["entries"]
         if not entries:
             lbl_progress.config(text="")
+            progress_bar["value"] = 0
             return
         done  = sum(1 for e in entries if (e.get("translation") or "").strip())
         total = len(entries)
-        lbl_progress.config(text=f"Translated: {done}/{total}  ({int(done/total*100)}%)")
+        pct = int(done / total * 100)
+        lbl_progress.config(text=f"Translated: {done}/{total}  ({pct}%)")
+        progress_bar["value"] = pct
 
     def set_entries_from_data(data, json_path, nps_path):
         entries = sorted(data.get("entries", []), key=lambda r: r.get("id", 0))
@@ -624,7 +730,7 @@ def run_gui(initial_path: Path = None):
         state["history_busy"] = False
         rebuild_tree()
         fname = (nps_path.name if nps_path else None) or (json_path.name if json_path else "")
-        root.title(f"NPS Translation Tool — {fname}")
+        _refresh_window_title()
         set_status(f"Loaded: {fname}  |  {len(entries)} entries")
         update_progress()
 
@@ -846,8 +952,13 @@ def run_gui(initial_path: Path = None):
                 orig_e["translation"] = new_tr
 
             state["modified"] = True
-            rebuild_tree()
+            state["history_busy"] = True
+            try:
+                rebuild_tree()
+            finally:
+                state["history_busy"] = False
             update_progress()
+            _refresh_window_title()
             set_status(f"Import complete — {matched} translations applied from {tr_path.name}")
             win.destroy()
 
@@ -900,6 +1011,7 @@ def run_gui(initial_path: Path = None):
         state["json_path"].write_text(
             json.dumps(state["data"], ensure_ascii=False, indent=2), encoding="utf-8")
         state["modified"] = False
+        _refresh_window_title()
         set_status(f"Saved → {state['json_path'].name}")
         update_progress()
 
@@ -922,6 +1034,7 @@ def run_gui(initial_path: Path = None):
             state["json_path"].write_text(
                 json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             state["modified"] = False
+            _refresh_window_title()
             set_status(f"Saved → {translated_path.name}")
             messagebox.showinfo("Done", f"Saved as:\n{translated_path}")
         except Exception as e:
@@ -1075,6 +1188,188 @@ def run_gui(initial_path: Path = None):
         root.clipboard_append(txt)
         set_status("Copied translation to clipboard")
 
+    EASTER_EGG_CHANCE = 0.02
+
+    _saya_popup = {
+        "img": None,
+        "win": None,
+        "label": None,
+        "anim_after": None,
+        "trans_key": "#01ff01",
+        "load_error_shown": False,
+        "tmp_paths": [],
+    }
+
+    def _load_saya_image():
+        png_pic = _resource_path("saya-pic.png")
+        gif_pic = _resource_path("saya-pic.gif")
+        # Prefer PNG because it preserves alpha transparency.
+        pic = png_pic if png_pic.exists() else gif_pic
+        if not pic.exists():
+            return None, "saya-pic.gif / saya-pic.png not found"
+
+        errors = []
+
+        try:
+            # Prefer native Tk image loader first.
+            img = tk.PhotoImage(file=str(pic.resolve()))
+            max_dim = max(img.width(), img.height())
+            if max_dim > 140:
+                factor = max(1, max_dim // 120)
+                img = img.subsample(factor, factor)
+            return img, None
+        except Exception as tk_err:
+            errors.append(f"Tk PNG: {tk_err}")
+
+        # Fallback: convert via Pillow to formats Tk can decode reliably.
+        # GIF/PPM work on older Tk builds where PNG support is unavailable.
+        try:
+            from PIL import Image  # type: ignore
+            pil_img = Image.open(pic).convert("RGBA")
+            pil_img.thumbnail((140, 140))
+
+            temp_root = Path(tempfile.gettempdir())
+            for ext, fmt, save_img in (
+                ("gif", "GIF", pil_img.convert("P", palette=Image.ADAPTIVE)),
+                ("ppm", "PPM", pil_img.convert("RGB")),
+                ("png", "PNG", pil_img),
+            ):
+                out = temp_root / f"nps_saya_popup_tmp.{ext}"
+                try:
+                    save_img.save(out, format=fmt)
+                    img = tk.PhotoImage(file=str(out))
+                    _saya_popup["tmp_paths"].append(out)
+                    return img, None
+                except Exception as fmt_err:
+                    errors.append(f"Tk {ext.upper()}: {fmt_err}")
+        except Exception as pil_err:
+            errors.append(f"PIL open/convert: {pil_err}")
+
+        # Last resort: no image support; caller will show text badge.
+        return None, "; ".join(errors)
+
+    def _cancel_saya_anim():
+        aid = _saya_popup.get("anim_after")
+        if aid is not None:
+            try:
+                root.after_cancel(aid)
+            except Exception:
+                pass
+            _saya_popup["anim_after"] = None
+
+    def _ensure_saya_overlay():
+        if _saya_popup["win"] is not None:
+            return
+        win = tk.Toplevel(root)
+        win.overrideredirect(True)
+        try:
+            win.attributes("-topmost", True)
+        except Exception:
+            pass
+        trans_key = _saya_popup["trans_key"]
+        win.configure(bg=trans_key)
+        try:
+            win.wm_attributes("-transparentcolor", trans_key)
+        except Exception:
+            # Fallback for Tk builds without transparent color support.
+            win.configure(bg=BG)
+
+        label = tk.Label(
+            win,
+            bg=trans_key,
+            fg=FG,
+            bd=0,
+            relief="flat",
+            highlightthickness=0,
+            padx=0,
+            pady=0,
+            font=(UI_FONT, 9, "bold"),
+        )
+        label.pack()
+        _saya_popup["win"] = win
+        _saya_popup["label"] = label
+
+    def maybe_show_saya_popup(has_translation: bool):
+        # Mini easter egg: appears only sometimes after Enter on non-empty text.
+        if not has_translation or random.random() > EASTER_EGG_CHANCE:
+            return
+        if _saya_popup["img"] is None:
+            img, err = _load_saya_image()
+            _saya_popup["img"] = img
+            if err and not _saya_popup["load_error_shown"]:
+                _saya_popup["load_error_shown"] = True
+                set_status(f"Saya image unavailable, using text badge ({err})")
+
+        _ensure_saya_overlay()
+        win = _saya_popup["win"]
+        lbl = _saya_popup["label"]
+        if win is None or lbl is None:
+            return
+
+        trans_key = _saya_popup["trans_key"]
+        if _saya_popup["img"] is not None:
+            lbl.configure(image=_saya_popup["img"], text="", bg=trans_key)
+            lbl.image = _saya_popup["img"]
+            sprite_w = _saya_popup["img"].width()
+            sprite_h = _saya_popup["img"].height()
+        else:
+            lbl.configure(image="", text="Saya", bg=SURFACE, bd=1, relief="solid", padx=6, pady=2)
+            lbl.image = None
+            win.update_idletasks()
+            sprite_w = max(48, lbl.winfo_reqwidth())
+            sprite_h = max(18, lbl.winfo_reqheight())
+
+        _cancel_saya_anim()
+
+        root.update_idletasks()
+        rx = root.winfo_rootx()
+        ry = root.winfo_rooty()
+        rw = root.winfo_width()
+        rh = root.winfo_height()
+
+        min_x = rx + 10
+        max_x = rx + max(10, rw - sprite_w - 10)
+        x = random.randint(min_x, max_x)
+        start_y = ry + rh + sprite_h + 4
+        peak_y = max(ry + 14, ry + rh - sprite_h - 120)
+        end_y = ry + rh + sprite_h + 28
+
+        win.geometry(f"{sprite_w}x{sprite_h}+{x}+{start_y}")
+        win.deiconify()
+
+        jump_frames = 10
+        fall_frames = 14
+        frame_ms = 16
+
+        def ease_out_quad(t: float) -> float:
+            return 1.0 - (1.0 - t) * (1.0 - t)
+
+        def ease_in_quad(t: float) -> float:
+            return t * t
+
+        def step_jump(i: int):
+            t = i / max(1, jump_frames)
+            k = ease_out_quad(t)
+            y = int(start_y + (peak_y - start_y) * k)
+            win.geometry(f"{sprite_w}x{sprite_h}+{x}+{y}")
+            if i < jump_frames:
+                _saya_popup["anim_after"] = root.after(frame_ms, step_jump, i + 1)
+            else:
+                _saya_popup["anim_after"] = root.after(frame_ms, step_fall, 0)
+
+        def step_fall(i: int):
+            t = i / max(1, fall_frames)
+            k = ease_in_quad(t)
+            y = int(peak_y + (end_y - peak_y) * k)
+            win.geometry(f"{sprite_w}x{sprite_h}+{x}+{y}")
+            if i < fall_frames:
+                _saya_popup["anim_after"] = root.after(frame_ms, step_fall, i + 1)
+            else:
+                _saya_popup["anim_after"] = None
+                win.withdraw()
+
+        step_jump(0)
+
     # ── Tree ─────────────────────────────────────────────────────────────────
     def _ensure_speaker_tag(orig_spk: str):
         if not orig_spk:
@@ -1087,9 +1382,14 @@ def run_gui(initial_path: Path = None):
             tree.tag_configure(tag, foreground=colour)
 
     def rebuild_tree():
+        current_id = state.get("current_id")
+        selected_iid = None
+        first_iid = None
         for item in tree.get_children():
             tree.delete(item)
         for i, e in enumerate(state["entries"]):
+            if not _entry_matches_filter(e):
+                continue
             orig_spk  = e.get("speaker", "")
             disp_spk  = get_display_speaker(orig_spk)
             has_tr    = bool((e.get("translation") or "").strip())
@@ -1105,11 +1405,26 @@ def run_gui(initial_path: Path = None):
                 _ensure_speaker_tag(orig_spk)
                 color_tag = f"spk_{orig_spk}"
 
-            tree.insert("", tk.END,
-                        values=(e.get("id"), disp_spk, e.get("original", ""),
-                                e.get("translation", ""), e.get("type", ""),
-                                e.get("line_no", "")),
-                        tags=(stripe, color_tag))
+            iid = tree.insert("", tk.END,
+                              values=(e.get("id"), disp_spk, e.get("original", ""),
+                                      e.get("translation", ""), e.get("type", ""),
+                                      e.get("line_no", "")),
+                              tags=(stripe, color_tag))
+            if first_iid is None:
+                first_iid = iid
+            if current_id is not None and e.get("id") == current_id:
+                selected_iid = iid
+
+        if selected_iid is not None:
+            tree.selection_set(selected_iid)
+            tree.focus(selected_iid)
+            tree.see(selected_iid)
+        elif first_iid is not None:
+            tree.selection_set(first_iid)
+            tree.focus(first_iid)
+            tree.see(first_iid)
+        else:
+            state["current_id"] = None
         on_tree_select()
         update_progress()
 
@@ -1120,6 +1435,7 @@ def run_gui(initial_path: Path = None):
                 if e.get("translation") != txt:
                     e["translation"] = txt
                     state["modified"] = True
+                    _refresh_window_title()
                     for iid in tree.get_children():
                         vals = tree.item(iid, "values")
                         if int(vals[0]) == entry_id:
@@ -1232,6 +1548,13 @@ def run_gui(initial_path: Path = None):
             return
         sel = tree.selection()
         if not sel:
+            state["current_id"] = None
+            lbl_info.config(text="No row selected")
+            speaker_var.set("")
+            original_text.configure(state="normal")
+            original_text.delete("1.0", tk.END)
+            original_text.configure(state="disabled")
+            translation_text.delete("1.0", tk.END)
             return
         vals     = tree.item(sel[0], "values")
         entry_id = int(vals[0])
@@ -1258,6 +1581,7 @@ def run_gui(initial_path: Path = None):
         search_state["matches"] = []
         search_state["index"]   = -1
         if not q:
+            search_count_var.set("Matches: 0")
             set_status("Search cleared")
             return
         matches = [
@@ -1265,6 +1589,7 @@ def run_gui(initial_path: Path = None):
             if q in " ".join(str(v) for v in tree.item(iid, "values")[1:4]).lower()
         ]
         search_state["matches"] = matches
+        search_count_var.set(f"Matches: {len(matches)}")
         set_status(
             f"Found {len(matches)} match(es) for: '{q}'"
             if matches else f"No matches for: '{q}'")
@@ -1285,6 +1610,22 @@ def run_gui(initial_path: Path = None):
     search_entry.bind("<KeyRelease>", lambda e: rebuild_search_matches())
     search_entry.bind("<Return>",
                       lambda e: (rebuild_search_matches(), select_match(1)) or "break")
+
+    def focus_search(_event=None):
+        search_entry.focus_set()
+        search_entry.selection_range(0, tk.END)
+        return "break"
+
+    def clear_search(_event=None):
+        if search_var.get():
+            search_var.set("")
+            rebuild_search_matches()
+            return "break"
+        return None
+
+    def find_next_match(_event=None):
+        select_match(-1 if (_event and _event.state & 0x1) else 1)
+        return "break"
 
     # ── Keyboard shortcuts ───────────────────────────────────────────────────
     def on_ctrl_key(event):
@@ -1316,6 +1657,9 @@ def run_gui(initial_path: Path = None):
             return redo_action()
 
     root.bind_all("<KeyPress>", on_ctrl_key)
+    root.bind("<Control-f>", focus_search)
+    root.bind("<Escape>", clear_search)
+    root.bind("<F3>", find_next_match)
 
     # ── Arrow key navigation ─────────────────────────────────────────────────
     # Up/Down in the translation Text widget → move between entries
@@ -1338,6 +1682,8 @@ def run_gui(initial_path: Path = None):
     tree.bind("<Down>", on_tree_arrow)
 
     def on_enter_in_translation(event):
+        has_translation = bool(translation_text.get("1.0", tk.END).strip())
+        maybe_show_saya_popup(has_translation)
         navigate_entry(1)
         return "break"
 
@@ -1366,6 +1712,12 @@ def run_gui(initial_path: Path = None):
         if state["modified"] and messagebox.askyesno(
                 "Exit", "Unsaved changes. Quick Save before exit?"):
             quick_save_json()
+        _cancel_saya_anim()
+        if _saya_popup.get("win") is not None:
+            try:
+                _saya_popup["win"].destroy()
+            except Exception:
+                pass
         root.destroy()
 
     root.protocol("WM_DELETE_WINDOW", on_close)

@@ -7,7 +7,7 @@ set EXE_NAME=NPSTranslationTool
 
 echo Building %EXE_NAME%.exe ...
 
-py -3 -m PyInstaller --noconfirm --onefile --windowed --name "%EXE_NAME%" --icon "Locus-logo.ico" --add-data "Locus-logo.png;." "%SCRIPT_NAME%"
+py -3 -m PyInstaller --noconfirm --onefile --windowed --name "%EXE_NAME%" --icon "Locus-logo.ico" --add-data "Locus-logo.png;." --add-data "saya-pic.png;." "%SCRIPT_NAME%"
 
 echo.
 echo Done. The executable will be in the "dist" folder as %EXE_NAME%.exe
