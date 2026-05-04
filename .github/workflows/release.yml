@@ -89,5 +89,6 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          name: "NPS Translation Tool ${{ github.ref_name }}"
           files: dist/NPSTranslationTool-*
           generate_release_notes: true
