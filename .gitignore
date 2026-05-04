@@ -17,6 +17,7 @@ __tmp_nps_translator__.json
 # Local release scripts
 release.bat
 release.ps1
+tag
 
 # OS
 .DS_Store
