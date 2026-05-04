@@ -19,7 +19,7 @@ except Exception:
     tk = None
 
 
-APP_VERSION   = "1.6.1"
+APP_VERSION   = "1.6.2"
 
 def _get_aliases_file() -> Path:
     import os
@@ -505,6 +505,17 @@ def run_gui(initial_path: Path = None):
     MONO_FONT = "Consolas"
 
     root.configure(bg=BG)
+
+    # Remove default white borders on Linux (no-op on Windows/macOS)
+    root.option_add("*Frame.highlightThickness", 0)
+    root.option_add("*Frame.bd", 0)
+    root.option_add("*Label.highlightThickness", 0)
+    root.option_add("*Label.bd", 0)
+    root.option_add("*Text.highlightThickness", 0)
+    root.option_add("*Entry.highlightThickness", 0)
+    root.option_add("*Canvas.highlightThickness", 0)
+    root.option_add("*Button.highlightThickness", 0)
+    root.option_add("*Button.bd", 1)
 
     style = ttk.Style()
     try:
