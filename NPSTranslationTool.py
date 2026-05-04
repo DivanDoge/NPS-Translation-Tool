@@ -1,4 +1,4 @@
-import json
+﻿import json
 import random
 import re
 import sys
@@ -19,7 +19,7 @@ except Exception:
     tk = None
 
 
-APP_VERSION   = "1.5.2"
+APP_VERSION   = "1.6.0"
 
 def _get_aliases_file() -> Path:
     import os
@@ -295,6 +295,7 @@ def import_translations_from_nps(translated_nps_path: Path, original_entries: li
     """
     Parse the translated .nps file and match its translatable lines
     to the original entries by position (index order).
+    Verifies entry type and speaker match before importing.
     Returns (updated_entries, matched_count, total_count).
     """
     translated_entries = build_entries_from_nps(translated_nps_path)
@@ -308,11 +309,50 @@ def import_translations_from_nps(translated_nps_path: Path, original_entries: li
         if i >= len(translated_entries):
             break
         tr = translated_entries[i]
+
+        # Verify alignment: entry type must match
+        if tr.get("type") != orig.get("type"):
+            continue
+        # For voice lines, speaker must also match
+        if orig.get("type") == "voice" and tr.get("speaker") != orig.get("speaker"):
+            continue
+
         # Only import if the translated text differs from original
         tr_text = tr.get("original", "").strip()
         orig_text = orig.get("original", "").strip()
         if tr_text and tr_text != orig_text:
             orig["translation"] = tr_text
+            matched += 1
+
+    return updated, matched, total
+
+
+def import_translations_from_json(json_path: Path, original_entries: list) -> tuple:
+    """
+    Import translations from a JSON file by matching on original text content.
+    Only imports an entry when its 'original' field exactly matches the
+    corresponding entry in the current project.
+    Returns (updated_entries, matched_count, total_count).
+    """
+    data = json.loads(json_path.read_text(encoding="utf-8"))
+    json_entries = data.get("entries", [])
+
+    # Build lookup: original_text -> translation
+    orig_to_tr: dict = {}
+    for e in json_entries:
+        orig = e.get("original", "").strip()
+        tr = (e.get("translation") or "").strip()
+        if orig and tr and tr != orig:
+            orig_to_tr[orig] = tr
+
+    updated = [e.copy() for e in original_entries]
+    matched = 0
+    total = len(original_entries)
+
+    for entry in updated:
+        orig_text = entry.get("original", "").strip()
+        if orig_text in orig_to_tr:
+            entry["translation"] = orig_to_tr[orig_text]
             matched += 1
 
     return updated, matched, total
@@ -343,21 +383,27 @@ def run_gui(initial_path: Path = None):
     root.title("NPS Translation Tool")
     root.minsize(900, 600)
 
-    # ── Colour palette ───────────────────────────────────────────────────────
-    BG      = "#0d1117"
-    PANEL   = "#161b22"
-    SURFACE = "#21262d"
-    BORDER  = "#30363d"
-    FG      = "#c9d1d9"
-    FG_DIM  = "#8b949e"
-    ACCENT  = "#2f81f7"
-    ACCENT2 = "#238636"
-    GREEN   = "#3fb950"
-    ORANGE  = "#d29922"
-    SEL_BG  = "#1f2a3a"
-    BTN_HO  = "#30363d"
-    TEAL    = "#1f6feb"
-    UI_FONT = "Trebuchet MS"
+    # ── Colour palette (web version) ─────────────────────────────────────────
+    BG        = "#0f0f13"
+    PANEL     = "#16161c"
+    SURFACE   = "#1e1e26"
+    SURFACE2  = "#26262f"
+    BORDER    = "#2e2e3a"
+    BORDER2   = "#3a3a48"
+    FG        = "#e8e8f2"
+    FG_DIM    = "#9898b0"
+    FG3       = "#5a5a72"
+    ACCENT    = "#7c6af7"
+    ACCENT2   = "#5a9cf8"
+    GREEN     = "#4ec97b"
+    ORANGE    = "#e8a24f"
+    TEAL      = "#2dbfa0"
+    RED       = "#f07178"
+    CYAN      = "#89ddff"
+    SEL_BG    = "#2a2248"
+    BTN_HO    = "#26262f"
+    UI_FONT   = "Segoe UI"
+    MONO_FONT = "Consolas"
 
     root.configure(bg=BG)
 
@@ -367,40 +413,134 @@ def run_gui(initial_path: Path = None):
     except Exception:
         pass
     style.configure("Treeview", background=SURFACE, foreground=FG,
-                    fieldbackground=SURFACE, rowheight=25, borderwidth=0,
-                    font=(UI_FONT, 10))
+                    fieldbackground=SURFACE, rowheight=27, borderwidth=0,
+                    relief="flat", font=(MONO_FONT, 9))
+    style.layout("Treeview", [("Treeview.treearea", {"sticky": "nswe"})])
     style.map("Treeview",
               background=[("selected", SEL_BG)],
               foreground=[("selected", FG)])
-    style.configure("Treeview.Heading", background=PANEL, foreground=FG_DIM,
-                    relief="flat", font=(UI_FONT, 10, "bold"))
-    style.map("Treeview.Heading", background=[("active", BORDER)])
+    style.configure("Treeview.Heading", background=PANEL, foreground=FG3,
+                    relief="flat", font=(UI_FONT, 8))
+    style.map("Treeview.Heading", background=[("active", SURFACE)])
     for ori in ("Vertical", "Horizontal"):
-        style.configure(f"{ori}.TScrollbar", background=PANEL, troughcolor=BG,
-                        bordercolor=BG, arrowcolor=FG_DIM, relief="flat")
+        style.configure(f"{ori}.TScrollbar", background=SURFACE, troughcolor=BG,
+                        bordercolor=BG, arrowcolor=FG3, relief="flat")
     style.configure("Accent.Horizontal.TProgressbar",
                     troughcolor=SURFACE, background=ACCENT,
                     bordercolor=SURFACE, lightcolor=ACCENT, darkcolor=ACCENT)
 
+    # ── Slim canvas-based scrollbar ──────────────────────────────────────────
+    class SlimScrollbar(tk.Canvas):
+        """Thin, modern rounded scrollbar using Canvas."""
+        _W = 10
+
+        def __init__(self, parent, command=None, **kw):
+            super().__init__(parent, width=self._W, bg=BG,
+                             highlightthickness=0, bd=0, **kw)
+            self._command  = command
+            self._lo       = 0.0
+            self._hi       = 1.0
+            self._drag_y   = None
+            self._drag_lo  = None
+            self._hover    = False
+            self.bind("<Configure>",       self._redraw)
+            self.bind("<ButtonPress-1>",   self._press)
+            self.bind("<B1-Motion>",       self._drag)
+            self.bind("<ButtonRelease-1>", self._release)
+            self.bind("<Enter>",           lambda _: self._set_hover(True))
+            self.bind("<Leave>",           lambda _: self._set_hover(False))
+            self.bind("<MouseWheel>",      self._wheel)
+
+        def set(self, lo, hi):
+            self._lo, self._hi = float(lo), float(hi)
+            self._redraw()
+
+        def _redraw(self, *_):
+            self.delete("all")
+            h = self.winfo_height()
+            if h < 4:
+                return
+            w   = self.winfo_width()
+            pad = 2
+            ty1 = max(pad, int(self._lo * h))
+            ty2 = min(h - pad, int(self._hi * h))
+            ty2 = max(ty2, ty1 + 20)
+            col = ACCENT if self._hover else SURFACE2
+            r   = max(1, (w - pad * 2) // 2)
+            self._rrect(pad, ty1, w - pad, ty2, r, col)
+
+        def _rrect(self, x1, y1, x2, y2, r, c):
+            r  = min(r, (x2 - x1) // 2, max(1, (y2 - y1) // 2))
+            kw = dict(fill=c, outline="")
+            self.create_arc(x1,       y1,       x1+2*r, y1+2*r, start=90,  extent=90, **kw)
+            self.create_arc(x2-2*r,   y1,       x2,     y1+2*r, start=0,   extent=90, **kw)
+            self.create_arc(x1,       y2-2*r,   x1+2*r, y2,     start=180, extent=90, **kw)
+            self.create_arc(x2-2*r,   y2-2*r,   x2,     y2,     start=270, extent=90, **kw)
+            self.create_rectangle(x1+r, y1,   x2-r, y2,   **kw)
+            self.create_rectangle(x1,   y1+r, x2,   y2-r, **kw)
+
+        def _set_hover(self, v):
+            self._hover = v
+            self._redraw()
+
+        def _press(self, e):
+            h   = self.winfo_height()
+            ty1 = self._lo * h
+            ty2 = self._hi * h
+            if ty1 <= e.y <= ty2:
+                self._drag_y  = e.y
+                self._drag_lo = self._lo
+            elif self._command:
+                self._command("moveto", str(e.y / h))
+
+        def _drag(self, e):
+            if self._drag_y is None:
+                return
+            h = self.winfo_height()
+            if self._command:
+                self._command("moveto", str(self._drag_lo + (e.y - self._drag_y) / h))
+
+        def _release(self, _):
+            self._drag_y = self._drag_lo = None
+
+        def _wheel(self, e):
+            if self._command:
+                self._command("scroll", -1 if e.delta > 0 else 1, "units")
+
     # ── Widget helpers ───────────────────────────────────────────────────────
     def mk_btn(parent, text, cmd, color=ACCENT, width=None, tooltip=None):
-        btn_fg = "#ffffff" if color in (ACCENT, ACCENT2, TEAL, GREEN) else FG
-        kw = dict(text=text, command=cmd, bg=color, fg=FG,
-                  activebackground=BTN_HO, activeforeground=btn_fg,
+        is_primary   = color == ACCENT
+        is_success   = color == TEAL
+        is_accent2   = color == ACCENT2
+        is_green     = color == GREEN
+        btn_fg = "#ffffff" if (is_primary or is_success or is_accent2 or is_green) else FG_DIM
+        _hover_map = {
+            ACCENT:   "#6a58e0",
+            TEAL:     "#22a88c",
+            ACCENT2:  "#4a8ce8",
+            GREEN:    "#3db868",
+            SURFACE:  SURFACE2,
+            SURFACE2: BORDER,
+        }
+        hover_bg = _hover_map.get(color, SURFACE2)
+        kw = dict(text=text, command=cmd, bg=color, fg=btn_fg,
+                  activebackground=hover_bg, activeforeground="#ffffff",
                   relief="flat", bd=0, cursor="hand2",
-                  padx=10, pady=5, font=(UI_FONT, 10))
-        kw["fg"] = btn_fg
+                  padx=10, pady=4, font=(MONO_FONT, 9))
         if width:
             kw["width"] = width
         b = tk.Button(parent, **kw)
+        b.bind("<Enter>", lambda e, h=hover_bg: b.configure(bg=h), add="+")
+        b.bind("<Leave>", lambda e, c=color: b.configure(bg=c), add="+")
         if tooltip:
             _add_tooltip(b, tooltip)
         return b
 
     def mk_label(parent, text, **kw):
+        font = kw.pop("font", (UI_FONT, 9))
         return tk.Label(parent, text=text,
-                        bg=kw.pop("bg", BG), fg=kw.pop("fg", FG_DIM),
-                        font=(UI_FONT, 10), **kw)
+                        bg=kw.pop("bg", BG), fg=kw.pop("fg", FG3),
+                        font=font, **kw)
 
     def mk_entry(parent, **kw):
         # Some Tk builds do not support Entry undo/maxundo options.
@@ -417,15 +557,23 @@ def run_gui(initial_path: Path = None):
         def show(e):
             tip_win[0] = tk.Toplevel(widget)
             tip_win[0].wm_overrideredirect(True)
-            tip_win[0].wm_geometry(f"+{e.x_root+12}+{e.y_root+8}")
-            tk.Label(tip_win[0], text=tip_text, bg="#30363d", fg="#c9d1d9",
-                     relief="solid", bd=1, font=(UI_FONT, 9), padx=4, pady=2).pack()
+            tip_win[0].wm_geometry(f"+{e.x_root+14}+{e.y_root+12}")
+            lbl = tk.Label(tip_win[0], text=tip_text,
+                           bg=SURFACE2, fg=FG,
+                           relief="flat", bd=0,
+                           font=(MONO_FONT, 9), padx=8, pady=4)
+            lbl.pack()
+            try:
+                tip_win[0].configure(
+                    highlightbackground=BORDER2, highlightthickness=1)
+            except Exception:
+                pass
         def hide(e):
             if tip_win[0]:
                 tip_win[0].destroy()
                 tip_win[0] = None
-        widget.bind("<Enter>", show)
-        widget.bind("<Leave>", hide)
+        widget.bind("<Enter>", show, add="+")
+        widget.bind("<Leave>", hide, add="+")
 
     # ── Speaker aliases ──────────────────────────────────────────────────────
     _aliases_box = [load_aliases()]
@@ -474,19 +622,25 @@ def run_gui(initial_path: Path = None):
     # LAYOUT
     # ════════════════════════════════════════════════════════════════════════
 
-    toolbar = tk.Frame(root, bg=PANEL, pady=6)
+    toolbar = tk.Frame(root, bg=PANEL, pady=7)
     toolbar.pack(fill=tk.X)
+    tk.Label(toolbar, text="NPS Translation Tool",
+             bg=PANEL, fg=ACCENT, font=(UI_FONT, 10, "bold"),
+             padx=14).pack(side=tk.LEFT)
+    tk.Frame(toolbar, bg=BORDER, width=1).pack(
+        side=tk.LEFT, fill=tk.Y, padx=(2, 10), pady=4)
     tb_left = tk.Frame(toolbar, bg=PANEL)
-    tb_left.pack(side=tk.LEFT, padx=10)
-    tk.Label(toolbar, text=f"v{APP_VERSION}", bg=PANEL, fg=FG_DIM,
-             font=(UI_FONT, 9)).pack(side=tk.RIGHT, padx=10)
+    tb_left.pack(side=tk.LEFT)
+    tk.Label(toolbar, text=f"v{APP_VERSION}", bg=PANEL, fg=FG3,
+             font=(MONO_FONT, 9)).pack(side=tk.RIGHT, padx=14)
 
     tk.Frame(root, bg=BORDER, height=1).pack(fill=tk.X)
     lbl_status = tk.Label(
         root,
         text="No file loaded — drag a .nps or .json here, or use the buttons above",
-        bg=PANEL, fg=FG_DIM, font=(UI_FONT, 9), anchor="w", padx=10, pady=5)
+        bg=PANEL, fg=FG3, font=(MONO_FONT, 9), anchor="w", padx=12, pady=3)
     lbl_status.pack(fill=tk.X)
+    tk.Frame(root, bg=BORDER, height=1).pack(fill=tk.X)
 
     main_pane = tk.PanedWindow(root, orient=tk.VERTICAL, bg=BG,
                                sashwidth=5, sashrelief="flat", sashpad=2)
@@ -498,25 +652,25 @@ def run_gui(initial_path: Path = None):
 
     search_bar = tk.Frame(top_pane, bg=PANEL, pady=5)
     search_bar.pack(fill=tk.X)
-    mk_label(search_bar, "🔍", bg=PANEL, fg=FG_DIM).pack(side=tk.LEFT, padx=(8, 2))
+    tk.Label(search_bar, text="⌕", bg=PANEL, fg=FG3,
+             font=(MONO_FONT, 11)).pack(side=tk.LEFT, padx=(10, 2))
     search_var = tk.StringVar()
     search_entry = mk_entry(search_bar, textvariable=search_var, bg=SURFACE, fg=FG,
                             insertbackground=FG, relief="flat", bd=0,
-                            font=(UI_FONT, 10), highlightthickness=1,
+                            font=(MONO_FONT, 10), highlightthickness=1,
                             highlightbackground=BORDER, highlightcolor=ACCENT)
-    search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+    search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
     mk_btn(search_bar, "◀", lambda: select_match(-1), SURFACE).pack(side=tk.LEFT, padx=2)
     mk_btn(search_bar, "▶", lambda: select_match(1),  SURFACE).pack(side=tk.LEFT, padx=2)
     mk_btn(search_bar, "✕",
            lambda: (search_var.set(""), rebuild_search_matches()), SURFACE
            ).pack(side=tk.LEFT, padx=(2, 8))
-    search_count_var = tk.StringVar(value="Matches: 0")
-    tk.Label(search_bar, textvariable=search_count_var, bg=PANEL, fg=FG_DIM,
-             font=(UI_FONT, 9, "bold")).pack(side=tk.RIGHT, padx=(0, 10))
+    search_count_var = tk.StringVar(value="")
+    tk.Label(search_bar, textvariable=search_count_var, bg=PANEL, fg=FG3,
+             font=(MONO_FONT, 9)).pack(side=tk.RIGHT, padx=(0, 12))
 
     filter_bar = tk.Frame(top_pane, bg=BG)
-    filter_bar.pack(fill=tk.X, padx=8, pady=(6, 4))
-    mk_label(filter_bar, "Show:", bg=BG, fg=FG_DIM).pack(side=tk.LEFT, padx=(0, 6))
+    filter_bar.pack(fill=tk.X, padx=10, pady=(5, 4))
     filter_buttons = {}
 
     def _set_filter(mode: str):
@@ -531,141 +685,154 @@ def run_gui(initial_path: Path = None):
             if mode == current:
                 btn.configure(bg=ACCENT, fg="#ffffff")
             else:
-                btn.configure(bg=SURFACE, fg=FG)
+                btn.configure(bg=SURFACE, fg=FG_DIM)
 
     for mode, title in [
-        ("all", "All"),
-        ("todo", "Untranslated"),
-        ("done", "Translated"),
-        ("voice", "Voice"),
+        ("all",       "All"),
+        ("todo",      "Untranslated"),
+        ("done",      "Translated"),
+        ("voice",     "Voice"),
         ("narration", "Narration"),
-        ("choice", "Choices"),
+        ("choice",    "Choices"),
     ]:
         btn = mk_btn(filter_bar, title, lambda m=mode: _set_filter(m), SURFACE)
         btn.pack(side=tk.LEFT, padx=(0, 4))
         filter_buttons[mode] = btn
     _update_filter_buttons()
 
-    tree_frame = tk.Frame(top_pane, bg=BG)
+    # Bordered wrapper: outer Frame acts as 1px border line
+    _tree_outer = tk.Frame(top_pane, bg=BORDER, padx=1, pady=1)
+    _tree_outer.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
+    tree_frame = tk.Frame(_tree_outer, bg=BG)
     tree_frame.pack(fill=tk.BOTH, expand=True)
 
     columns = ("id", "speaker", "original", "translation", "type", "line_no")
     tree = ttk.Treeview(tree_frame, columns=columns, show="headings",
                         selectmode="browse", height=15)
     for col, heading, w, anch, stretch in [
-        ("id",          "ID",          45,  "center", False),
-        ("speaker",     "Speaker",     130, "w",      False),
-        ("original",    "Original",    420, "w",      True),
-        ("translation", "Translation", 420, "w",      True),
-        ("type",        "Type",        75,  "center", False),
-        ("line_no",     "Line",        55,  "center", False),
+        ("id",          "#",           42,  "center", False),
+        ("speaker",     "speaker",     120, "w",      False),
+        ("original",    "original",    420, "w",      True),
+        ("translation", "translation", 420, "w",      True),
+        ("type",        "type",        68,  "center", False),
+        ("line_no",     "line",        50,  "center", False),
     ]:
         tree.heading(col, text=heading, anchor=anch)
         tree.column(col, width=w, anchor=anch, stretch=stretch)
 
-    tree.tag_configure("odd",      background="#0d1117")
-    tree.tag_configure("even",     background="#161b22")
+    tree.tag_configure("odd",      background=BG)
+    tree.tag_configure("even",     background=PANEL)
     tree.tag_configure("done",     foreground=GREEN)
     tree.tag_configure("empty",    foreground=FG_DIM)
     tree.tag_configure("narrator", foreground=ORANGE)
-    tree.tag_configure("choice",   foreground="#58a6ff")
+    tree.tag_configure("choice",   foreground=CYAN)
 
     _SPEAKER_COLOURS = [
-        "#c792ea", "#5a9cf8", "#e8a24f", "#f07178", "#89ddff",
-        "#c3e88d", "#ff9cac", "#82aaff", "#ffcb6b", "#b2ccd6",
-        "#d4a5ff", "#ff869a", "#80cbc4", "#f78c6c", "#a6accd",
+        "#7c6af7", "#5a9cf8", "#f07178", "#89ddff", "#c792ea",
+        "#4ec97b", "#ff9cac", "#b39dff", "#d4a5ff", "#2dbfa0",
+        "#82aaff", "#ff869a", "#80cbc4", "#38bdf8", "#a6accd",
     ]
     _speaker_colour_map: dict = {}
 
-    vsb = ttk.Scrollbar(tree_frame, orient="vertical",
-                        command=tree.yview, style="Vertical.TScrollbar")
+    vsb = SlimScrollbar(tree_frame, command=tree.yview)
     tree.configure(yscroll=vsb.set)
     tree.grid(row=0, column=0, sticky="nsew")
-    vsb.grid(row=0, column=1, sticky="ns")
+    vsb.grid(row=0, column=1, sticky="ns", padx=(1, 1), pady=1)
     tree_frame.rowconfigure(0, weight=1)
     tree_frame.columnconfigure(0, weight=1)
 
     # ── Bottom: editor ───────────────────────────────────────────────────────
-    bot_pane = tk.Frame(main_pane, bg=BG)
-    main_pane.add(bot_pane, stretch="never", minsize=190)
+    bot_pane = tk.Frame(main_pane, bg=PANEL)
+    main_pane.add(bot_pane, stretch="never", minsize=200)
 
-    speaker_row = tk.Frame(bot_pane, bg=PANEL, pady=5)
-    speaker_row.pack(fill=tk.X)
-    mk_label(speaker_row, "Speaker:", bg=PANEL, fg=FG_DIM).pack(side=tk.LEFT, padx=(10, 4))
+    # Meta row: speaker + info + progress
+    tk.Frame(bot_pane, bg=BORDER, height=1).pack(fill=tk.X)
+    editor_meta = tk.Frame(bot_pane, bg=PANEL, pady=5)
+    editor_meta.pack(fill=tk.X)
+    tk.Label(editor_meta, text="speaker:", bg=PANEL, fg=FG3,
+             font=(UI_FONT, 9)).pack(side=tk.LEFT, padx=(12, 4))
     speaker_var = tk.StringVar()
-    tk.Label(speaker_row, textvariable=speaker_var, bg=PANEL, fg=ACCENT2,
-             font=(UI_FONT, 10, "bold"), anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
-    mk_btn(speaker_row, "✏ Rename Speaker", lambda: open_alias_editor(), SURFACE,
+    tk.Label(editor_meta, textvariable=speaker_var, bg=PANEL, fg=ACCENT2,
+             font=(UI_FONT, 9, "bold"), anchor="w").pack(side=tk.LEFT)
+    lbl_info = tk.Label(editor_meta, text="", bg=PANEL, fg=FG3,
+                        font=(MONO_FONT, 9), anchor="w")
+    lbl_info.pack(side=tk.LEFT, padx=(16, 0))
+    lbl_progress = tk.Label(editor_meta, text="", bg=PANEL, fg=GREEN,
+                            font=(MONO_FONT, 9, "bold"), anchor="e")
+    lbl_progress.pack(side=tk.RIGHT, padx=(0, 12))
+    mk_btn(editor_meta, "✏ Rename Speaker", lambda: open_alias_editor(), SURFACE,
            tooltip="Set display alias for speakers (only visible in app)"
-           ).pack(side=tk.RIGHT, padx=8)
+           ).pack(side=tk.RIGHT, padx=(0, 8))
 
-    progress_row = tk.Frame(bot_pane, bg=BG)
-    progress_row.pack(fill=tk.X, padx=8, pady=(2, 0))
-    lbl_info = tk.Label(progress_row, text="", bg=BG, fg=FG_DIM,
-                        font=(UI_FONT, 9), anchor="w")
-    lbl_info.pack(side=tk.LEFT)
-    lbl_progress = tk.Label(progress_row, text="", bg=BG, fg=GREEN,
-                            font=(UI_FONT, 9, "bold"), anchor="e")
-    lbl_progress.pack(side=tk.RIGHT)
+    # Progress bar
     progress_bar = ttk.Progressbar(bot_pane, mode="determinate", maximum=100,
                                    style="Accent.Horizontal.TProgressbar")
-    progress_bar.pack(fill=tk.X, padx=8, pady=(3, 0))
+    progress_bar.pack(fill=tk.X, padx=0, pady=0)
 
-    # Original text block
-    orig_frame = tk.Frame(bot_pane, bg=BG)
-    orig_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=(4, 2))
-    orig_header = tk.Frame(orig_frame, bg=BG)
-    orig_header.pack(fill=tk.X)
-    mk_label(orig_header, "Original", bg=BG, fg=FG_DIM).pack(side=tk.LEFT)
-    mk_btn(orig_header, "⧉ Copy",
+    # Side-by-side body: original | translation
+    tk.Frame(bot_pane, bg=BORDER, height=1).pack(fill=tk.X)
+    editor_body = tk.Frame(bot_pane, bg=PANEL)
+    editor_body.pack(fill=tk.BOTH, expand=True)
+    editor_body.columnconfigure(0, weight=1)
+    editor_body.columnconfigure(1, weight=1)
+    editor_body.rowconfigure(1, weight=1)
+
+    # ── Original column ──────────────────────────────────────────────────────
+    orig_col_header = tk.Frame(editor_body, bg=SURFACE, pady=4)
+    orig_col_header.grid(row=0, column=0, sticky="ew")
+    mk_label(orig_col_header, "ORIGINAL", bg=SURFACE, fg=FG3,
+             font=(UI_FONT, 8)).pack(side=tk.LEFT, padx=10)
+    mk_btn(orig_col_header, "⧉ Copy",
            lambda: _copy_original_plain(), SURFACE,
            tooltip="Copy original text to clipboard"
-           ).pack(side=tk.RIGHT, padx=(4, 0))
-    mk_btn(orig_header, "🔤 Translit → Translation",
+           ).pack(side=tk.RIGHT, padx=(4, 6))
+    mk_btn(orig_col_header, "🔤 Translit",
            lambda: _translit_to_translation_field(), SURFACE,
-           tooltip="Transliterate Latin→Ukrainian and insert into Translation field"
+           tooltip="Transliterate Latin→Ukrainian into Translation field"
            ).pack(side=tk.RIGHT, padx=(4, 0))
+    tk.Frame(editor_body, bg=BORDER, width=1).grid(row=0, column=0, sticky="e",
+                                                    rowspan=2)
 
-    original_text = tk.Text(orig_frame, height=3, wrap="word",
-                            bg=SURFACE, fg=FG, insertbackground=FG,
-                            relief="flat", bd=0, font=(UI_FONT, 10),
-                            padx=8, pady=6, highlightthickness=1,
-                            highlightbackground=BORDER, highlightcolor=BORDER,
+    orig_text_wrap = tk.Frame(editor_body, bg=SURFACE)
+    orig_text_wrap.grid(row=1, column=0, sticky="nsew")
+    original_text = tk.Text(orig_text_wrap, wrap="word",
+                            bg=SURFACE, fg=FG_DIM, insertbackground=FG,
+                            relief="flat", bd=0, font=(MONO_FONT, 10),
+                            padx=10, pady=8, highlightthickness=0,
                             selectbackground=SEL_BG)
-    original_text.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+    original_text.pack(fill=tk.BOTH, expand=True)
     original_text.configure(state="disabled")
 
-    # Translation text block
-    tr_frame = tk.Frame(bot_pane, bg=BG)
-    tr_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=(4, 8))
-    tr_header = tk.Frame(tr_frame, bg=BG)
-    tr_header.pack(fill=tk.X)
-    mk_label(tr_header, "Translation", bg=BG, fg=FG_DIM).pack(side=tk.LEFT)
-    tk.Label(tr_header, text="↑↓ navigate  •  Enter → next  •  -- → —",
-             bg=BG, fg=FG_DIM, font=(UI_FONT, 9)).pack(side=tk.LEFT, padx=(10, 0))
-
-    mk_btn(tr_header, "⧉ Copy",
+    # ── Translation column ───────────────────────────────────────────────────
+    tr_col_header = tk.Frame(editor_body, bg=SURFACE, pady=4)
+    tr_col_header.grid(row=0, column=1, sticky="ew")
+    mk_label(tr_col_header, "TRANSLATION", bg=SURFACE, fg=FG3,
+             font=(UI_FONT, 8)).pack(side=tk.LEFT, padx=10)
+    tk.Label(tr_col_header, text="↑↓  •  Enter→next  •  --→—",
+             bg=SURFACE, fg=FG3, font=(MONO_FONT, 8)).pack(side=tk.LEFT, padx=(6, 0))
+    mk_btn(tr_col_header, "⧉ Copy",
            lambda: _copy_translation(), SURFACE,
            tooltip="Copy translation to clipboard"
-           ).pack(side=tk.RIGHT, padx=(4, 0))
-    mk_btn(tr_header, "✕ Clear",
+           ).pack(side=tk.RIGHT, padx=(4, 6))
+    mk_btn(tr_col_header, "✕ Clear",
            lambda: translation_text.delete("1.0", tk.END), SURFACE,
            tooltip="Clear translation field"
            ).pack(side=tk.RIGHT, padx=(4, 0))
-    mk_btn(tr_header, "↷", lambda: redo_action(), SURFACE, width=3,
+    mk_btn(tr_col_header, "↷", lambda: redo_action(), SURFACE, width=3,
            tooltip="Redo (Ctrl+Y / Ctrl+Shift+Z)"
            ).pack(side=tk.RIGHT, padx=(4, 0))
-    mk_btn(tr_header, "↶", lambda: undo_action(), SURFACE, width=3,
+    mk_btn(tr_col_header, "↶", lambda: undo_action(), SURFACE, width=3,
            tooltip="Undo (Ctrl+Z), up to 200 actions"
            ).pack(side=tk.RIGHT, padx=(4, 0))
 
-    translation_text = tk.Text(tr_frame, height=3, wrap="word",
-                               bg=SURFACE, fg=FG, insertbackground=FG,
-                               relief="flat", bd=0, font=(UI_FONT, 10),
-                               padx=8, pady=6, highlightthickness=1,
-                               highlightbackground=BORDER, highlightcolor=ACCENT,
+    tr_text_wrap = tk.Frame(editor_body, bg=SURFACE2)
+    tr_text_wrap.grid(row=1, column=1, sticky="nsew")
+    translation_text = tk.Text(tr_text_wrap, wrap="word",
+                               bg=SURFACE2, fg=FG, insertbackground=FG,
+                               relief="flat", bd=0, font=(MONO_FONT, 10),
+                               padx=10, pady=8, highlightthickness=0,
                                selectbackground=SEL_BG)
-    translation_text.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+    translation_text.pack(fill=tk.BOTH, expand=True)
 
     # ════════════════════════════════════════════════════════════════════════
     # ── Em-dash autocorrect: -- → — ─────────────────────────────────────────
@@ -839,11 +1006,13 @@ def run_gui(initial_path: Path = None):
             messagebox.showwarning(
                 "Unsupported", f"Cannot open: {path.name}\nSupported: .nps, .json")
 
-    # ── Import translation from plain NPS ────────────────────────────────────
+    # ── Import translation from NPS or JSON ──────────────────────────────────
     def import_translation_from_nps():
         """
-        Open a translated .nps file (no JSON), match entries by position,
-        and fill in translation fields. Shows a preview/confirmation dialog.
+        Open a translated .nps or .json file and fill in translation fields.
+        - .nps: positional matching with type/speaker alignment verification.
+        - .json: matches by original text content (exact match required).
+        Shows a preview/confirmation dialog.
         """
         if not state["entries"]:
             messagebox.showinfo("Import Translation",
@@ -851,14 +1020,24 @@ def run_gui(initial_path: Path = None):
             return
 
         fn = filedialog.askopenfilename(
-            title="Open translated .nps file",
-            filetypes=[("NPS files", "*.nps"), ("All files", "*.*")])
+            title="Open translated .nps or .json file",
+            filetypes=[
+                ("NPS / JSON files", "*.nps *.json"),
+                ("NPS files", "*.nps"),
+                ("JSON files", "*.json"),
+                ("All files", "*.*"),
+            ])
         if not fn:
             return
         tr_path = Path(fn)
 
         try:
-            updated, matched, total = import_translations_from_nps(tr_path, state["entries"])
+            if tr_path.suffix.lower() == ".json":
+                updated, matched, total = import_translations_from_json(tr_path, state["entries"])
+                match_method = "original text"
+            else:
+                updated, matched, total = import_translations_from_nps(tr_path, state["entries"])
+                match_method = "position + alignment"
         except Exception as e:
             messagebox.showerror("Error", f"Failed to import translations:\n{e}")
             return
@@ -866,9 +1045,9 @@ def run_gui(initial_path: Path = None):
         if matched == 0:
             messagebox.showinfo(
                 "Import Translation",
-                f"No differences found between the files.\n"
-                f"Compared {total} entries — all texts are identical.\n\n"
-                f"Make sure you selected the TRANSLATED file, not the original.")
+                f"No matching translations found.\n"
+                f"Checked {total} entries — no valid matches detected.\n\n"
+                f"Make sure you selected the correct TRANSLATED file.")
             return
 
         # Preview dialog
@@ -881,11 +1060,11 @@ def run_gui(initial_path: Path = None):
 
         tk.Label(win,
                  text=f"Found {matched} translated lines out of {total} compared entries.",
-                 bg=BG, fg=GREEN, font=("Segoe UI", 10, "bold")
+                 bg=BG, fg=GREEN, font=(MONO_FONT, 10, "bold")
                  ).pack(padx=16, pady=(12, 2))
         tk.Label(win,
-                 text="Preview of changes (Original → Translation). Scroll to review.",
-                 bg=BG, fg=FG_DIM, font=("Segoe UI", 9)
+                 text=f"Matched by: {match_method}. Preview of changes (Original → Translation). Scroll to review.",
+                 bg=BG, fg=FG3, font=(MONO_FONT, 9)
                  ).pack(padx=16, pady=(0, 6))
         tk.Frame(win, bg=BORDER, height=1).pack(fill=tk.X, padx=16)
 
@@ -903,7 +1082,7 @@ def run_gui(initial_path: Path = None):
         preview_tree.column("original",    width=310, anchor="w",      stretch=True)
         preview_tree.column("translation", width=310, anchor="w",      stretch=True)
         preview_tree.tag_configure("changed", foreground=GREEN)
-        preview_tree.tag_configure("same",    foreground=FG_DIM)
+        preview_tree.tag_configure("same",    foreground=FG3)
 
         pvb = ttk.Scrollbar(pf, orient="vertical", command=preview_tree.yview)
         preview_tree.configure(yscroll=pvb.set)
@@ -930,9 +1109,9 @@ def run_gui(initial_path: Path = None):
             opt_frame,
             text="Overwrite existing translations (uncheck = only fill empty fields)",
             variable=overwrite_var,
-            bg=BG, fg=FG, selectcolor=SURFACE,
+            bg=BG, fg=FG_DIM, selectcolor=SURFACE,
             activebackground=BG, activeforeground=FG,
-            font=("Segoe UI", 9)
+            font=(MONO_FONT, 9)
         ).pack(side=tk.LEFT)
 
         confirmed = [False]
@@ -1106,12 +1285,12 @@ def run_gui(initial_path: Path = None):
         tk.Label(
             win,
             text="Speaker display aliases  —  only visible in this app, never saved to file",
-            bg=BG, fg=FG_DIM, font=("Segoe UI", 9)
+            bg=BG, fg=FG3, font=(MONO_FONT, 9)
         ).pack(padx=16, pady=(12, 2))
         tk.Label(
             win,
             text="Original name → Display alias   (leave blank to keep original)",
-            bg=BG, fg="#555566", font=("Segoe UI", 8)
+            bg=BG, fg=FG3, font=(MONO_FONT, 8)
         ).pack(padx=16, pady=(0, 6))
         tk.Frame(win, bg=BORDER, height=1).pack(fill=tk.X, padx=16)
 
@@ -1123,12 +1302,12 @@ def run_gui(initial_path: Path = None):
             row = tk.Frame(list_frame, bg=BG)
             row.pack(fill=tk.X, pady=4)
             tk.Label(row, text=sp, bg=BG, fg=FG,
-                     font=("Segoe UI", 9), width=30, anchor="w"
+                     font=(MONO_FONT, 9), width=30, anchor="w"
                      ).pack(side=tk.LEFT, padx=(0, 8))
             var = tk.StringVar(value=_aliases_box[0].get(sp, ""))
             mk_entry(row, textvariable=var, bg=SURFACE, fg=FG,
                      insertbackground=FG, relief="flat",
-                     font=("Segoe UI", 9), width=30,
+                     font=(MONO_FONT, 9), width=30,
                      highlightthickness=1,
                      highlightbackground=BORDER,
                      highlightcolor=ACCENT
@@ -1581,7 +1760,7 @@ def run_gui(initial_path: Path = None):
         search_state["matches"] = []
         search_state["index"]   = -1
         if not q:
-            search_count_var.set("Matches: 0")
+            search_count_var.set("")
             set_status("Search cleared")
             return
         matches = [
@@ -1589,7 +1768,7 @@ def run_gui(initial_path: Path = None):
             if q in " ".join(str(v) for v in tree.item(iid, "values")[1:4]).lower()
         ]
         search_state["matches"] = matches
-        search_count_var.set(f"Matches: {len(matches)}")
+        search_count_var.set(f"{len(matches)} result{'s' if len(matches) != 1 else ''}")
         set_status(
             f"Found {len(matches)} match(es) for: '{q}'"
             if matches else f"No matches for: '{q}'")

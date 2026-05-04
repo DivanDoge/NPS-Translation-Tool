@@ -1,0 +1,93 @@
+name: Build & Release
+
+# Runs when you push a tag like v1.5.3
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: NPSTranslationTool.exe
+            sep: ";"
+          - os: ubuntu-latest
+            artifact: NPSTranslationTool
+            sep: ":"
+          - os: macos-latest
+            artifact: NPSTranslationTool
+            sep: ":"
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pyinstaller tkinterdnd2
+
+      # tkinter is not bundled on ubuntu runners
+      - name: Install tkinter (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y python3-tk
+
+      - name: Build with PyInstaller
+        shell: bash
+        run: |
+          SEP="${{ matrix.sep }}"
+          pyinstaller \
+            --noconfirm \
+            --onefile \
+            --windowed \
+            --name "NPSTranslationTool" \
+            --add-data "Locus-logo.png${SEP}." \
+            --add-data "saya-pic.png${SEP}." \
+            NPSTranslationTool.py
+
+      # Rename so each platform artifact has a unique name
+      - name: Rename artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Move-Item dist\NPSTranslationTool.exe dist\NPSTranslationTool-windows.exe
+
+      - name: Rename artifact (Linux)
+        if: runner.os == 'Linux'
+        run: mv dist/NPSTranslationTool dist/NPSTranslationTool-linux
+
+      - name: Rename artifact (macOS)
+        if: runner.os == 'macOS'
+        run: mv dist/NPSTranslationTool dist/NPSTranslationTool-macos
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ runner.os }}
+          path: dist/NPSTranslationTool-*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/NPSTranslationTool-*
+          generate_release_notes: true
