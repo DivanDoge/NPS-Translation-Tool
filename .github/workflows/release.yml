@@ -61,7 +61,38 @@ jobs:
 
       - name: Rename artifact (Linux)
         if: runner.os == 'Linux'
-        run: mv dist/NPSTranslationTool dist/NPSTranslationTool-linux
+        run: mv dist/NPSTranslationTool dist/NPSTranslationTool-linux-bin
+
+      - name: Build AppImage (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
+          chmod +x appimagetool
+
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          cp dist/NPSTranslationTool-linux-bin AppDir/usr/bin/NPSTranslationTool
+          cp Locus-logo.png AppDir/usr/share/icons/hicolor/256x256/apps/NPSTranslationTool.png
+          cp Locus-logo.png AppDir/NPSTranslationTool.png
+
+          cat > AppDir/NPSTranslationTool.desktop << EOF
+          [Desktop Entry]
+          Name=NPS Translation Tool
+          Exec=NPSTranslationTool
+          Icon=NPSTranslationTool
+          Type=Application
+          Categories=Utility;
+          EOF
+
+          cat > AppDir/AppRun << 'EOF'
+          #!/bin/bash
+          HERE="$(dirname "$(readlink -f "$0")")"
+          exec "$HERE/usr/bin/NPSTranslationTool" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+
+          ARCH=x86_64 ./appimagetool AppDir dist/NPSTranslationTool-linux.AppImage
+          rm dist/NPSTranslationTool-linux-bin
 
       - name: Rename artifact (macOS)
         if: runner.os == 'macOS'

@@ -19,7 +19,7 @@ except Exception:
     tk = None
 
 
-APP_VERSION   = "1.6.2"
+APP_VERSION   = "1.6.3"
 
 def _get_aliases_file() -> Path:
     import os
@@ -372,15 +372,20 @@ def run_gui(initial_path: Path = None):
         root = tk.Tk()
 
     # ── Splash screen ────────────────────────────────────────────────────────
-    _SPLASH_BG = "#010101"   # used as transparent key on Windows
+    _SPLASH_BG = "#010101"  # transparent key color
+    _is_windows = sys.platform == "win32"
     splash = tk.Toplevel(root)
     splash.overrideredirect(True)
     splash.configure(bg=_SPLASH_BG)
-    splash.wm_attributes("-alpha", 0.0)
     try:
-        splash.wm_attributes("-transparentcolor", _SPLASH_BG)  # Windows only
+        if _is_windows:
+            splash.wm_attributes("-transparentcolor", _SPLASH_BG)
+        else:
+            # On Linux/macOS with compositing, use RGBA transparency
+            splash.wm_attributes("-transparentcolor", _SPLASH_BG)
     except Exception:
         pass
+    splash.wm_attributes("-alpha", 0.0)
     root.withdraw()
 
     _splash_img_ref = [None]
@@ -395,6 +400,7 @@ def run_gui(initial_path: Path = None):
             scaled = raw.subsample(sub, sub)
             img_w, img_h = w_raw // sub, h_raw // sub
             _splash_img_ref[0] = scaled
+            img_w, img_h = scaled.width(), scaled.height()  # real size after subsample
             pad = 32
             win_w, win_h = img_w + pad * 2, img_h + pad * 2 + 52
             x = (sw - win_w) // 2
@@ -434,10 +440,9 @@ def run_gui(initial_path: Path = None):
         try:
             splash.wm_attributes("-alpha", alpha)
         except Exception:
-            return
+            pass  # alpha not supported (some Linux WMs) — just show static
         # Close only when UI is ready AND minimum time has passed
         if _splash_state["ui_ready"] and elapsed_ms >= _MIN_SHOW_MS:
-            # wait until we're near peak alpha so it doesn't cut off abruptly
             if alpha >= _BREATH_MAX - 0.05:
                 _do_close_splash()
                 return
