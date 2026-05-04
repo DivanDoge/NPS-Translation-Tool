@@ -19,7 +19,7 @@ except Exception:
     tk = None
 
 
-APP_VERSION   = "1.6.3"
+APP_VERSION   = "1.6.4"
 
 def _get_aliases_file() -> Path:
     import os
