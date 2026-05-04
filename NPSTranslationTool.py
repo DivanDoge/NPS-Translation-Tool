@@ -19,7 +19,7 @@ except Exception:
     tk = None
 
 
-APP_VERSION   = "1.6.0"
+APP_VERSION   = "1.6.1"
 
 def _get_aliases_file() -> Path:
     import os
@@ -370,6 +370,105 @@ def run_gui(initial_path: Path = None):
         root = TkinterDnD.Tk()
     else:
         root = tk.Tk()
+
+    # ── Splash screen ────────────────────────────────────────────────────────
+    _SPLASH_BG = "#010101"   # used as transparent key on Windows
+    splash = tk.Toplevel(root)
+    splash.overrideredirect(True)
+    splash.configure(bg=_SPLASH_BG)
+    splash.wm_attributes("-alpha", 0.0)
+    try:
+        splash.wm_attributes("-transparentcolor", _SPLASH_BG)  # Windows only
+    except Exception:
+        pass
+    root.withdraw()
+
+    _splash_img_ref = [None]
+    try:
+        logo_path = _resource_path("Locus-logo.png")
+        if logo_path.exists():
+            raw = tk.PhotoImage(file=str(logo_path))
+            w_raw, h_raw = raw.width(), raw.height()
+            sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+            target_h = min(int(sh * 0.12), 150)
+            sub = max(1, h_raw // target_h)
+            scaled = raw.subsample(sub, sub)
+            img_w, img_h = w_raw // sub, h_raw // sub
+            _splash_img_ref[0] = scaled
+            pad = 32
+            win_w, win_h = img_w + pad * 2, img_h + pad * 2 + 52
+            x = (sw - win_w) // 2
+            y = (sh - win_h) // 2
+            splash.geometry(f"{win_w}x{win_h}+{x}+{y}")
+            tk.Label(splash, image=scaled, bg=_SPLASH_BG, bd=0).pack(pady=(pad, 8))
+        else:
+            splash.geometry("360x180")
+            splash.eval("tk::PlaceWindow . center")
+    except Exception:
+        splash.geometry("360x180")
+
+    tk.Label(splash, text=f"NPS Translation Tool  v{APP_VERSION}",
+             bg=_SPLASH_BG, fg="#7c6af7",
+             font=("Segoe UI", 13, "bold")).pack()
+    tk.Label(splash, text="Loading…",
+             bg=_SPLASH_BG, fg="#9898b0",
+             font=("Segoe UI", 9)).pack(pady=(4, 0))
+    splash.update()
+
+    # Breathing animation state
+    import math, time as _time
+    _splash_state   = {"ui_ready": False, "start": _time.time(), "closed": False}
+    _BREATH_PERIOD  = 2000   # ms per full breath cycle
+    _BREATH_MIN     = 0.35
+    _BREATH_MAX     = 1.0
+    _MIN_SHOW_MS    = 200
+
+    def _breath_tick():
+        if _splash_state["closed"]:
+            return
+        elapsed_ms = (_time.time() - _splash_state["start"]) * 1000
+        # sine wave: 0→1→0 over _BREATH_PERIOD
+        t    = (elapsed_ms % _BREATH_PERIOD) / _BREATH_PERIOD   # 0..1
+        sine = (math.sin(t * 2 * math.pi - math.pi / 2) + 1) / 2  # 0..1
+        alpha = _BREATH_MIN + (_BREATH_MAX - _BREATH_MIN) * sine
+        try:
+            splash.wm_attributes("-alpha", alpha)
+        except Exception:
+            return
+        # Close only when UI is ready AND minimum time has passed
+        if _splash_state["ui_ready"] and elapsed_ms >= _MIN_SHOW_MS:
+            # wait until we're near peak alpha so it doesn't cut off abruptly
+            if alpha >= _BREATH_MAX - 0.05:
+                _do_close_splash()
+                return
+        splash.after(30, _breath_tick)
+
+    def _do_close_splash():
+        if _splash_state["closed"]:
+            return
+        _splash_state["closed"] = True
+        # Fade out
+        def _fade(a=_BREATH_MAX):
+            if a <= 0.0:
+                try:
+                    splash.destroy()
+                except Exception:
+                    pass
+                root.deiconify()
+                return
+            try:
+                splash.wm_attributes("-alpha", a)
+            except Exception:
+                root.deiconify()
+                return
+            splash.after(18, lambda: _fade(round(a - 0.07, 2)))
+        _fade()
+
+    def _close_splash():
+        _splash_state["ui_ready"] = True
+
+    _breath_tick()
+    # ────────────────────────────────────────────────────────────────────────
 
     app_icon_ref = [None]
     try:
@@ -1900,6 +1999,9 @@ def run_gui(initial_path: Path = None):
         root.destroy()
 
     root.protocol("WM_DELETE_WINDOW", on_close)
+
+    # Close splash once main window is ready
+    root.after(100, _close_splash)
 
     if initial_path is not None:
         open_any_file(initial_path)
