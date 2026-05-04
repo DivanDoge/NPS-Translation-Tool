@@ -1,7 +1,29 @@
+# PyInstaller output
 dist/
 build/
 *.spec
+
+# Python cache
 __pycache__/
 *.pyc
+*.pyo
+
+# User-local data (не пушити чужі переклади/аліаси)
 nps_speaker_aliases.json
 __tmp_nps_translator__.json
+*.json
+!nps_speaker_aliases.json.example
+
+# Local release script
+release.bat
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
